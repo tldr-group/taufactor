@@ -135,8 +135,8 @@ class Solver:
             self.semi_converged = False
 
 class PeriodicSolver(Solver):
-    def __init__(self, img):
-        super().__init__(img)
+    def __init__(self, img, iter_limit):
+        super().__init__(img, iter_limit)
         self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2]
 
     def init_nn(self, img):
