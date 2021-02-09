@@ -11,8 +11,8 @@ TauFactor
         :alt: Documentation Status
 
 
-.. image:: https://pyup.io/repos/github/isaacsquires/taufactor/shield.svg
-        :target: https://pyup.io/repos/github/isaacsquires/taufactor/
+.. image:: https://pyup.io/repos/github/tldr-group/taufactor/shield.svg
+        :target: https://pyup.io/repos/github/tldr-group/taufactor/
         :alt: Updates
 
 

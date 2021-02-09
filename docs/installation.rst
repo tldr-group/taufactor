@@ -30,9 +30,9 @@ These instructions are for running TauFactor in a development environment (i.e. 
 
 To access the most recent development branch, run::
 
-    git clone --recursive https://github.com/isaacsquires/taufactor.git
+    git clone --recursive https://github.com/tldr-group/taufactor.git
     cd taufactor
     pip install .
 
-.. _Github repo: https://github.com/isaacsquires/taufactor
-.. _tarball: https://github.com/isaacsquires/taufactor/tarball/master
+.. _Github repo: https://github.com/tldr-group/taufactor
+.. _tarball: https://github.com/tldr-group/taufactor/tarball/master
