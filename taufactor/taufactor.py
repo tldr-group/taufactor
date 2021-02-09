@@ -5,14 +5,14 @@ from timeit import default_timer as timer
 from scipy.ndimage import measurements
 
 class Solver:
-    def __init__(self, img):
+    def __init__(self, img, iter_limit=-1):
         # add batch dim now for consistency
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
 
         # VF calc
         self.VF = np.mean(img)
-
+        self.iter_limit = iter_limit
         # save original image in cuda
         img = cp.array(img, dtype=cp.single)
         self.ph_bot = cp.sum(img[:, -1])
@@ -115,13 +115,14 @@ class Solver:
             out *= self.cb[iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
             iter += 1
-            if iter == 3000:
-                self.converged = True
-        iter /= 2
+            if iter == self.iter_limit:
+                print('Did not converge in the iteration limit')
+                return (lt * self.L_A * 2).get()
+        iter = int(iter/2)
         print('converged to:', cp.around(lt * self.L_A * 2, 6),
               'after: ', iter, 'iterations in: ', timer() - start,
               'seconds at a rate of', (timer() - start)/iter, 'iters per second')
-        return (lt * self.L_A * 2).get(), iter
+        return (lt * self.L_A * 2).get()
 
     def check_convergence(self, lt, lb):
         loss = (lt - lb) / ((lt + lb) / 2)
@@ -173,9 +174,11 @@ class PeriodicSolver(Solver):
             out -= self.conc[:, 2:-2]
             out *= self.cb[iter % 2]
             self.conc[:, 2:-2] += out
-            iter += 0.5
-            if iter == 3000:
-                self.converged = True
+            iter += 1
+            if iter == self.iter_limit:
+                print('Did not converge in the iteration limit')
+                return (lt * self.L_A * 2).get()
+        iter = int(iter/2)
         print('converged to:', cp.around(lt * self.L_A * 2, 6),
               'after: ', iter, 'iterations in: ', timer() - start,
               'seconds at a rate of', (timer() - start)/iter, 's/iter')
