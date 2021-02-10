@@ -2,7 +2,6 @@
 import numpy as np
 import cupy as cp
 from timeit import default_timer as timer
-from scipy.ndimage import measurements
 
 class Solver:
     def __init__(self, img, iter_limit=-1):
@@ -67,7 +66,6 @@ class Solver:
         cb = np.zeros([x, y, z])
         a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
         cb[(a + b + c) % 2 == 0] = 1
-        # cb[cb==0] = 0.5
         cb *= self.w
         return [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
 
