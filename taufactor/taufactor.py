@@ -4,17 +4,20 @@ import cupy as cp
 from timeit import default_timer as timer
 
 class Solver:
-    def __init__(self, img, iter_limit=-1):
+    def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True):
         # add batch dim now for consistency
+        self.verbose = verbose
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
-
+        self.cpu_img = img
+        self.precision = precision
         # VF calc
         self.VF = np.mean(img)
         self.iter_limit = iter_limit
         # save original image in cuda
-        img = cp.array(img, dtype=cp.single)
+        img = cp.array(img, dtype=self.precision)
         self.ph_bot = cp.sum(img[:, -1])
+        self.ph_top = cp.sum(img[:, 0])
 
         # init conc
         self.conc = self.init_conc(img)
@@ -27,7 +30,7 @@ class Solver:
         self.cb = self.init_cb(img)
 
         # solving params
-        bs, x, y, z = img.shape
+        bs, x, y, z = self.cpu_img.shape
         self.L_A = x / (z * y)
         self.converged = False
         self.semi_converged = False
@@ -36,20 +39,20 @@ class Solver:
     def init_conc(self, img):
         bs, x, y, z = img.shape
         sh = 1 / (x * 2)
-        vec = cp.linspace(0 + sh, 1 - sh, x)
+        vec = cp.linspace(0 + sh, 2 - sh, x) - 1
         for i in range(2):
             vec = cp.expand_dims(vec, -1)
         vec = cp.expand_dims(vec, 0)
         vec = vec.repeat(z, -1)
         vec = vec.repeat(y, -2)
         vec = vec.repeat(bs, 0)
-        vec = vec.astype(cp.single)
-        return self.pad(img * vec, [0, 2])
+        vec = vec.astype(self.precision)
+        return self.pad(img * vec, [-2, 2])
 
 
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))
-        nn = cp.zeros_like(img2, dtype=cp.single)
+        nn = cp.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, 4):
             for dr in [1, -1]:
@@ -105,10 +108,10 @@ class Solver:
                   self.conc[:, 1:-1, 1:-1, 2:] + \
                   self.conc[:, 1:-1, 1:-1, :-2]
             out /= self.nn
-            if iter % 10 == 0:
-                lt = abs(cp.sum(out[:, 0]))
+            if iter % 20 == 0:
+                lt = abs(cp.sum(out[:, 0]) + self.ph_top)
                 lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
-                self.check_convergence(lt, lb)
+                self.check_convergence(lt, lb, iter)
             out -= self.crop(self.conc, 1)
             out *= self.cb[iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
@@ -117,14 +120,18 @@ class Solver:
                 print('Did not converge in the iteration limit')
                 return (lt * self.L_A * 2).get()
         iter = int(iter/2)
-        print('converged to:', cp.around(lt * self.L_A * 2, 6),
-              'after: ', iter, 'iterations in: ', timer() - start,
-              'seconds at a rate of', (timer() - start)/iter, 'iters per second')
-        return (lt * self.L_A * 2).get()
+        if self.verbose:
+            print('converged to:', cp.around(lt * self.L_A * 2, 6),
+                  'after: ', iter, 'iterations in: ', timer() - start,
+                  'seconds at a rate of', (timer() - start)/iter, 'iters per second')
+        return ((lt + lb) * self.L_A).get()
 
-    def check_convergence(self, lt, lb):
+    def check_convergence(self, lt, lb, iter):
         loss = (lt - lb) / ((lt + lb) / 2)
-        if abs(loss) < 7 * 10**-4:
+        if iter % 100 == 0:
+            if self.verbose == 'per_iter':
+                print(iter, loss)
+        if abs(loss) < 1 * 10**-4:
             if self.semi_converged:
                 self.converged = True
             else:
@@ -132,14 +139,30 @@ class Solver:
         else:
             self.semi_converged = False
 
+    def conc_map(self):
+        img = self.conc[0, 1:-1, 1:-1, 1].get()
+        img[self.cpu_img[0, :, :, 0] == 0] = -1
+        plt.imshow(img)
+
+    def flux_map(self):
+        flux = cp.zeros_like(self.conc)
+        ph_map = self.pad(cp.array(self.cpu_img))
+        for dim in range(1, 4):
+            for dr in [1, -1]:
+                flux += abs(cp.roll(self.conc, dr, dim) - self.conc) * cp.roll(ph_map, dr, dim)
+        flux = flux[0, 1:-1, 1:-1, 1:-1].get()
+        flux[self.cpu_img[0] == 0] = 0
+        plt.imshow(flux[:, :, 0])
+        return flux
+
 class PeriodicSolver(Solver):
-    def __init__(self, img, iter_limit):
-        super().__init__(img, iter_limit)
+    def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True):
+        super().__init__(img, precision=precision, iter_limit=iter_limit, verbose=verbose)
         self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2]
 
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))[:, :, 2:-2, 2:-2]
-        nn = cp.zeros_like(img2, dtype=cp.single)
+        nn = cp.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, 4):
             for dr in [1, -1]:
@@ -166,9 +189,9 @@ class PeriodicSolver(Solver):
             out = out[:, 2:-2]
             out /= self.nn
             if iter % 10 == 0:
-                lt = abs(cp.sum(out[:, 0]))
+                lt = abs(cp.sum(out[:, 0]) + self.ph_top)
                 lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
-                self.check_convergence(lt, lb)
+                self.check_convergence(lt, lb, iter)
             out -= self.conc[:, 2:-2]
             out *= self.cb[iter % 2]
             self.conc[:, 2:-2] += out
@@ -177,8 +200,62 @@ class PeriodicSolver(Solver):
                 print('Did not converge in the iteration limit')
                 return (lt * self.L_A * 2).get()
         iter = int(iter/2)
-        print('converged to:', cp.around(lt * self.L_A * 2, 6),
-              'after: ', iter, 'iterations in: ', timer() - start,
-              'seconds at a rate of', (timer() - start)/iter, 's/iter')
-        return (lt * self.L_A * 2).get()
+        if self.verbose:
+            print('converged to:', cp.around(lt * self.L_A * 2, 6),
+                  'after: ', iter, 'iterations in: ', timer() - start,
+                  'seconds at a rate of', (timer() - start)/iter, 's/iter')
+        return ((lt + lb) * self.L_A).get()
 
+import matplotlib.pyplot as plt
+import numpy as np
+# img = np.load('../xy_352_rep_49.tif.npy')
+# # img = np.expand_dims(img, 2)
+# img += 1
+# img[img!=1] = 0
+# 2 directions, 3 phases,
+# img = img[:128, :128]
+# img = np.random.rand(1000, 1000, 1)
+# img[img > 0.3] = 1
+# img[img != 1] = 0
+#  # img = np.expand_dims(img, 1)
+# print(img.shape)
+# s = Solver(img, precision=cp.single, iter_limit=20000)
+# s.solve()
+errors = []
+
+for imsize in range(800, 2000, 100):
+    img = np.random.rand(imsize, imsize, 1)
+    img[img > 0.3] = 1
+    img[img != 1] = 0
+    # img = np.expand_dims(img, 1)
+    s = Solver(img, precision=cp.single, iter_limit=20000)
+    sing = s.solve()
+    s = Solver(img, precision=cp.double, iter_limit=20000)
+    doub = s.solve()
+    errors.append(abs(sing - doub)/sing)
+# s = Solver(img, precision=cp.double)
+# s.solve()
+# for ph in range(1,2):
+#     im = np.zeros_like(img)
+#     im[img==ph] = 1
+#     for ax in range(1):
+#         if ax:
+#             im = np.swapaxes(im, 0, 1)
+#         s = Solver(im, precision=cp.single)
+#         singles[ax, int(ph)-1] = s.solve()
+#         s = Solver(im, precision=cp.double)
+#         doubles[ax, int(ph)-1] = s.solve()
+# for ph in range(3):
+#     for ax in range(2):
+#         plt.scatter([ph]*2, doubles[:, ph], color='red')
+#         plt.scatter([ph]*2, singles[:, ph], color='blue')
+
+# img[img != 1] = 0
+
+# for x in range(6, 8):
+#     x = int(2**x)
+#     im = img[:x, :x]
+#     s = Solver(im, precision=cp.single)
+#     singles.append(s.solve())
+#     s = Solver(im, precision=cp.double)
+#     doubles.append(s.solve())
