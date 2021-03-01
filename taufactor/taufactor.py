@@ -4,8 +4,9 @@ import cupy as cp
 from timeit import default_timer as timer
 
 class Solver:
-    def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True):
+    def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True, bc=(-0.5, 0.5)):
         # add batch dim now for consistency
+        self.top_bc, self.bot_bc = bc
         self.verbose = verbose
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
@@ -16,8 +17,8 @@ class Solver:
         self.iter_limit = iter_limit
         # save original image in cuda
         img = cp.array(img, dtype=self.precision)
-        self.ph_bot = cp.sum(img[:, -1])
-        self.ph_top = cp.sum(img[:, 0])
+        self.ph_bot = cp.sum(img[:, -1]) * self.bot_bc
+        self.ph_top = cp.sum(img[:, 0]) * self.top_bc
 
         # init conc
         self.conc = self.init_conc(img)
@@ -39,7 +40,7 @@ class Solver:
     def init_conc(self, img):
         bs, x, y, z = img.shape
         sh = 1 / (x * 2)
-        vec = cp.linspace(0 + sh, 2 - sh, x) - 1
+        vec = cp.linspace(self.top_bc + sh, self.bot_bc - sh, x)
         for i in range(2):
             vec = cp.expand_dims(vec, -1)
         vec = cp.expand_dims(vec, 0)
@@ -47,7 +48,7 @@ class Solver:
         vec = vec.repeat(y, -2)
         vec = vec.repeat(bs, 0)
         vec = vec.astype(self.precision)
-        return self.pad(img * vec, [-2, 2])
+        return self.pad(img * vec, [self.top_bc * 2, self.bot_bc * 2])
 
 
     def init_nn(self, img):
@@ -82,7 +83,7 @@ class Solver:
         while len(vals) < 6:
             vals.append(0)
         to_pad = [1]*8
-        to_pad[:2] = (0,0)
+        to_pad[:2] = (0, 0)
         img = cp.pad(img, to_pad, 'constant')
         img[:, 0], img[:, -1] = vals[:2]
         img[:, :, 0], img[:, :, -1] = vals[2:4]
@@ -109,7 +110,7 @@ class Solver:
                   self.conc[:, 1:-1, 1:-1, :-2]
             out /= self.nn
             if iter % 20 == 0:
-                lt = abs(cp.sum(out[:, 0]) + self.ph_top)
+                lt = abs(cp.sum(out[:, 0]) - self.ph_top)
                 lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
                 self.check_convergence(lt, lb, iter)
             out -= self.crop(self.conc, 1)
@@ -118,7 +119,7 @@ class Solver:
             iter += 1
             if iter == self.iter_limit:
                 print('Did not converge in the iteration limit')
-                return (lt * self.L_A * 2).get()
+                return (lt * self.L_A).get()
         iter = int(iter/2)
         if self.verbose:
             print('converged to:', cp.around(lt * self.L_A * 2, 6),
@@ -156,8 +157,8 @@ class Solver:
         return flux
 
 class PeriodicSolver(Solver):
-    def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True):
-        super().__init__(img, precision=precision, iter_limit=iter_limit, verbose=verbose)
+    def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True, bc=(-0.5, 0.5)):
+        super().__init__(img, precision=precision, iter_limit=iter_limit, verbose=verbose, bc = bc)
         self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2]
 
     def init_nn(self, img):
@@ -189,7 +190,7 @@ class PeriodicSolver(Solver):
             out = out[:, 2:-2]
             out /= self.nn
             if iter % 10 == 0:
-                lt = abs(cp.sum(out[:, 0]) + self.ph_top)
+                lt = abs(cp.sum(out[:, 0]) - self.ph_top)
                 lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
                 self.check_convergence(lt, lb, iter)
             out -= self.conc[:, 2:-2]
@@ -205,57 +206,32 @@ class PeriodicSolver(Solver):
                   'after: ', iter, 'iterations in: ', timer() - start,
                   'seconds at a rate of', (timer() - start)/iter, 's/iter')
         return ((lt + lb) * self.L_A).get()
+#
+# import matplotlib.pyplot as plt
+# import numpy as np
 
-import matplotlib.pyplot as plt
-import numpy as np
-# img = np.load('../xy_352_rep_49.tif.npy')
-# # img = np.expand_dims(img, 2)
-# img += 1
-# img[img!=1] = 0
-# 2 directions, 3 phases,
-# img = img[:128, :128]
-# img = np.random.rand(1000, 1000, 1)
-# img[img > 0.3] = 1
-# img[img != 1] = 0
-#  # img = np.expand_dims(img, 1)
-# print(img.shape)
-# s = Solver(img, precision=cp.single, iter_limit=20000)
-# s.solve()
-errors = []
 
-for imsize in range(800, 2000, 100):
-    img = np.random.rand(imsize, imsize, 1)
-    img[img > 0.3] = 1
-    img[img != 1] = 0
-    # img = np.expand_dims(img, 1)
-    s = Solver(img, precision=cp.single, iter_limit=20000)
-    sing = s.solve()
-    s = Solver(img, precision=cp.double, iter_limit=20000)
-    doub = s.solve()
-    errors.append(abs(sing - doub)/sing)
-# s = Solver(img, precision=cp.double)
-# s.solve()
-# for ph in range(1,2):
-#     im = np.zeros_like(img)
-#     im[img==ph] = 1
-#     for ax in range(1):
-#         if ax:
-#             im = np.swapaxes(im, 0, 1)
-#         s = Solver(im, precision=cp.single)
-#         singles[ax, int(ph)-1] = s.solve()
-#         s = Solver(im, precision=cp.double)
-#         doubles[ax, int(ph)-1] = s.solve()
-# for ph in range(3):
-#     for ax in range(2):
-#         plt.scatter([ph]*2, doubles[:, ph], color='red')
-#         plt.scatter([ph]*2, singles[:, ph], color='blue')
+# this is a test for the effects of singles/doubles on different bcs
+# errors = []
+# sings = []
+# doubs = []
+# for bc in [(0, 1), (-1, 1), (-0.5, 0.5)]:
+#     err = []
+#     sing = []
+#     doub = []
+#     for imsize in range(800, 2000, 100):
+#         img = np.random.rand(imsize, imsize, 1)
+#         img[img > 0.3] = 1
+#         img[img != 1] = 0
+#         # img = np.expand_dims(img, 1)
+#         solv = Solver(img, precision=cp.single, iter_limit=20000, bc=bc)
+#         sing_tau = solv.solve()
+#         solv = Solver(img, precision=cp.double, iter_limit=20000, bc=bc)
+#         doub_tau = solv.solve()
+#         err.append(abs(sing_tau - doub_tau)/sing_tau)
+#         sing.append(sing_tau)
+#         doub.append(doub_tau)
+#     sings.append(sing)
+#     doubs.append(doub)
+#     errors.append(err)
 
-# img[img != 1] = 0
-
-# for x in range(6, 8):
-#     x = int(2**x)
-#     im = img[:x, :x]
-#     s = Solver(im, precision=cp.single)
-#     singles.append(s.solve())
-#     s = Solver(im, precision=cp.double)
-#     doubles.append(s.solve())
