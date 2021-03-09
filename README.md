@@ -54,6 +54,16 @@ s = tau.PeriodicSolver(img, iter_limit=1000)
 # call solve function
 D_rel = s.solve()
 ```
+
+# Tests
+
+To run unit tests navigate to the root directory and run
+
+```
+pytest
+```
+
+
 # Credits
 
 This package was created with Cookiecutter_ and the `audreyr/cookiecutter-pypackage`_ project template.
