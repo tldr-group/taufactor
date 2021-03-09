@@ -7,7 +7,6 @@ import pytest
 # from click.testing import CliRunner
 
 import taufactor as tau
-import tests.utils as utils
 import numpy as np
 
 #  Testing the main solver

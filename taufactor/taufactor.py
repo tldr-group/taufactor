@@ -2,6 +2,7 @@
 import numpy as np
 import cupy as cp
 from timeit import default_timer as timer
+import matplotlib.pyplot as plt
 
 class Solver:
     def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True, bc=(-0.5, 0.5)):
