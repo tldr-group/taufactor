@@ -4,9 +4,9 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 * Free software: MIT license
 * Documentation: https://taufactor.readthedocs.io.
 
-
-<img src="docs/tau_example.png" alt="TauFactor" width="324" height="324">
-
+<p align="center">
+<img src="https://tldr-group.github.io/static/media/tau_example.685a0640.png" alt="TauFactor" width="324" height="324">
+</p>
 <p align="center">
 <a href="https://pypi.python.org/pypi/taufactor">
         <img src="https://img.shields.io/pypi/v/taufactor.svg"
