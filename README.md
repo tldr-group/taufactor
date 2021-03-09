@@ -1,5 +1,5 @@
 # TauFactor
-TauFactor is an application for calculating tortuosity factors from tomographic data. TauFactor uses CuPy_ which is an implementation of NumPy-compatible multi-dimensional array on CUDA.
+TauFactor is an application for calculating tortuosity factors from tomographic data. TauFactor uses [CuPy](https://cupy.dev/) which is an implementation of NumPy-compatible multi-dimensional array on CUDA.
 
 * Free software: MIT license
 * Documentation: https://taufactor.readthedocs.io.
