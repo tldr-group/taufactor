@@ -1,13 +1,13 @@
 This documentation covers more advanced usage of TauFactor
 
-# Metrics
+## Metrics
 
 Metrics can be calculated using the metrics module
 ```python
 from taufactor.metrics import *
 ```
 
-## Volume fraction
+### Volume fraction
 Volume fraction is calculated for each phase in a segmented image:
 ```python
 import taufactor as tau
