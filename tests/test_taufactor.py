@@ -73,7 +73,7 @@ def test_volume_fraction_on_strip_of_ones():
     img[:,0:t,0:t]=1
     vf = volume_fraction(img, phases={'zeros':0, 'ones':1})
 
-    assert (vf['zeros'],vf['ones'])==(0.75,0.25) 
+    assert (vf['zeros'],vf['ones'])==(0.75,0.25)
 
 # Surface area
 
@@ -124,3 +124,12 @@ def test_surface_area_on_periodic_2d():
     sa = surface_area(img, phases=[0,1], periodic=[0,1])
 
     assert sa==6/18
+
+
+def test_surface_area_interfactial_3ph():
+    l = 3
+    img = np.zeros([l, l, l])
+    img[1] = 1
+    img[2] = 2
+    sa = surface_area(img, phases=[1, 2])
+    assert sa==1/6
