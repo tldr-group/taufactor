@@ -1,4 +1,4 @@
 Usage
 ===========
 
-.. mdinclude:: ../Usage.md
+.. mdinclude:: Usage.md
