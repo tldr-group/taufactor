@@ -120,26 +120,30 @@ class Solver:
             iter += 1
             if iter == self.iter_limit:
                 print('Did not converge in the iteration limit')
-                return (lt * self.L_A).get()
-        iter = int(iter/2)
+                return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+        iter = int(iter / 2)
         if self.verbose:
             print('converged to:', cp.around(lt * self.L_A * 2, 6),
-                  'after: ', iter, 'iterations in: ', timer() - start,
-                  'seconds at a rate of', (timer() - start)/iter, 'iters per second')
-        return ((lt + lb) * self.L_A).get()
+                  'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
+                  'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
+        return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
 
     def check_convergence(self, lt, lb, iter):
         loss = (lt - lb) / ((lt + lb) / 2)
         if iter % 100 == 0:
             if self.verbose == 'per_iter':
-                print(iter, loss)
+                print(iter, abs(loss))
         if abs(loss) < 1 * 10**-4:
             if self.semi_converged:
-                self.converged = True
+                if self.check_vertical_flux():
+                    self.converged = True
             else:
                 self.semi_converged = True
         else:
             self.semi_converged = False
+
+    def check_vertical_flux(self):
+        return True
 
     def conc_map(self):
         img = self.conc[0, 1:-1, 1:-1, 1].get()
@@ -200,39 +204,37 @@ class PeriodicSolver(Solver):
             iter += 1
             if iter == self.iter_limit:
                 print('Did not converge in the iteration limit')
-                return (lt * self.L_A * 2).get()
+                return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
         iter = int(iter/2)
         if self.verbose:
             print('converged to:', cp.around(lt * self.L_A * 2, 6),
-                  'after: ', iter, 'iterations in: ', timer() - start,
-                  'seconds at a rate of', (timer() - start)/iter, 's/iter')
-        return ((lt + lb) * self.L_A).get()
-#
-# import matplotlib.pyplot as plt
-# import numpy as np
+                  'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
+                  'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
+        return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
 
+    def check_vertical_flux(self):
+        vert_flux = abs(self.conc - cp.roll(self.conc, 1, 1))
+        vert_flux[self.conc == 0] = 0
+        vert_flux[cp.roll(self.conc, 1, 1) == 0] = 0
+        fl = cp.mean(vert_flux, (0, 2, 3))[3:-2]
+        err = fl.max() - fl.min()
+        if err < 1*10**-5:
+            return True
 
-# this is a test for the effects of singles/doubles on different bcs
-# errors = []
-# sings = []
-# doubs = []
-# for bc in [(0, 1), (-1, 1), (-0.5, 0.5)]:
-#     err = []
-#     sing = []
-#     doub = []
-#     for imsize in range(800, 2000, 100):
-#         img = np.random.rand(imsize, imsize, 1)
-#         img[img > 0.3] = 1
-#         img[img != 1] = 0
-#         # img = np.expand_dims(img, 1)
-#         solv = Solver(img, precision=cp.single, iter_limit=20000, bc=bc)
-#         sing_tau = solv.solve()
-#         solv = Solver(img, precision=cp.double, iter_limit=20000, bc=bc)
-#         doub_tau = solv.solve()
-#         err.append(abs(sing_tau - doub_tau)/sing_tau)
-#         sing.append(sing_tau)
-#         doub.append(doub_tau)
-#     sings.append(sing)
-#     doubs.append(doub)
-#     errors.append(err)
+    def flux_map(self):
+        flux = cp.zeros_like(self.conc)
+        ph_map = self.pad(self.pad(cp.array(self.cpu_img)))[:, :, 2:-2, 2:-2]
+        for dim in range(1, 4):
+            for dr in [1, -1]:
+                flux += abs(cp.roll(self.conc, dr, dim) - self.conc) * cp.roll(ph_map, dr, dim)
+        flux = flux[0, 2:-2].get()
+        flux[self.cpu_img[0] == 0] = 0
+        plt.imshow(flux[:, :, 0])
+        return flux
+
+    def conc_map(self):
+        img = self.conc[0, 2:-2, :, 1].get()
+        img[self.cpu_img[0, :, :, 0] == 0] = -1
+        plt.imshow(img)
+
 
