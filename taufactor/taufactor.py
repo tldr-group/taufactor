@@ -5,17 +5,15 @@ from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 
 class Solver:
-    def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True, bc=(-0.5, 0.5)):
+    def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5)):
         # add batch dim now for consistency
         self.top_bc, self.bot_bc = bc
-        self.verbose = verbose
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = precision
         # VF calc
         self.VF = np.mean(img)
-        self.iter_limit = iter_limit
         # save original image in cuda
         img = cp.array(img, dtype=self.precision)
         self.ph_bot = cp.sum(img[:, -1]) * self.bot_bc
@@ -29,6 +27,7 @@ class Solver:
 
         #checkerboarding
         self.w = 2 - cp.pi / (1.5 * img.shape[1])
+        # self.w = 1.99
         self.cb = self.init_cb(img)
 
         # solving params
@@ -36,6 +35,7 @@ class Solver:
         self.L_A = x / (z * y)
         self.converged = False
         self.semi_converged = False
+        self.iter=0
         img = None
 
     def init_conc(self, img):
@@ -94,14 +94,13 @@ class Solver:
     def crop(self, img, c = 1):
         return img[:, c:-c, c:-c, c:-c]
 
-    def solve(self):
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
         """
         iteratively converge the vol
         :param iters: number of steps
         :return:
         """
         start = timer()
-        iter = 0
         while not self.converged:
             out = self.conc[:, 2:, 1:-1, 1:-1] + \
                   self.conc[:, :-2, 1:-1, 1:-1] + \
@@ -110,40 +109,60 @@ class Solver:
                   self.conc[:, 1:-1, 1:-1, 2:] + \
                   self.conc[:, 1:-1, 1:-1, :-2]
             out /= self.nn
-            if iter % 20 == 0:
+            if self.iter % 20 == 0:
                 lt = abs(cp.sum(out[:, 0]) - self.ph_top)
                 lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
-                self.check_convergence(lt, lb, iter)
+                self.converged = self.check_convergence(lt, lb, verbose, conv_crit, start, iter_limit)
             out -= self.crop(self.conc, 1)
-            out *= self.cb[iter%2]
+            out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
-            iter += 1
-            if iter == self.iter_limit:
-                print('Did not converge in the iteration limit')
-                return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
-        iter = int(iter / 2)
-        if self.verbose:
-            print('converged to:', cp.around(lt * self.L_A * 2, 6),
-                  'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
-                  'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
-        return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+            self.iter += 1
+        return self.converged
 
-    def check_convergence(self, lt, lb, iter):
-        loss = (lt - lb) / ((lt + lb) / 2)
-        if iter % 100 == 0:
-            if self.verbose == 'per_iter':
-                print(iter, abs(loss))
-        if abs(loss) < 1 * 10**-4:
+
+    def check_convergence(self, lt, lb, verbose, conv_crit, start, iter_limit):
+        loss = lt - lb
+        # print progress
+        if self.iter % 100 == 0:
+            if verbose == 'per_iter':
+                print(self.iter, abs(loss))
+
+        # check for convergence if loss is good
+        if abs(loss) < conv_crit * 0.01:
             if self.semi_converged:
-                if self.check_vertical_flux():
-                    self.converged = True
+                if self.check_vertical_flux(conv_crit):
+                    iter = int(self.iter / 2)
+                    if verbose:
+                        print('converged to:', cp.around(lt * self.L_A * 2, 6),
+                              'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
+                              'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
+                    return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
             else:
                 self.semi_converged = True
         else:
             self.semi_converged = False
 
-    def check_vertical_flux(self):
-        return True
+        # increase precision to double if currently single
+        if self.iter >= iter_limit:
+            if self.precision == cp.single:
+                print('increasing precision to double')
+                self.iter = 0
+                self.conc = cp.array(self.conc, dtype=cp.double)
+                self.nn = cp.array(self.nn, dtype=cp.double)
+                self.precision = cp.double
+            else:
+                print('Did not converge in the iteration limit')
+                return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+
+    def check_vertical_flux(self, conv_crit):
+        vert_flux = self.conc[:, 2:, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]
+        vert_flux[self.conc[:, :-2, 1:-1, 1:-1] == 0] = 0
+        vert_flux[self.conc[:, 2:, 1:-1, 1:-1] == 0] = 0
+        fl = cp.sum(vert_flux, (0, 2, 3))[1:-1]
+        err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
+        if err < conv_crit:
+            return True
+        return False
 
     def conc_map(self):
         img = self.conc[0, 1:-1, 1:-1, 1].get()
@@ -162,10 +181,9 @@ class Solver:
         return flux
 
 class PeriodicSolver(Solver):
-    def __init__(self, img, precision=cp.single, iter_limit=-1, verbose=True, bc=(-0.5, 0.5)):
-        super().__init__(img, precision=precision, iter_limit=iter_limit, verbose=verbose, bc = bc)
+    def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5)):
+        super().__init__(img, precision=precision, bc = bc)
         self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2]
-
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))[:, :, 2:-2, 2:-2]
         nn = cp.zeros_like(img2, dtype=self.precision)
@@ -179,14 +197,13 @@ class PeriodicSolver(Solver):
         nn[nn == 0] = cp.inf
         return nn
 
-    def solve(self):
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
         """
         iteratively converge the vol
         :param iters: number of steps
         :return:
         """
         start = timer()
-        iter = 0
         while not self.converged:
             out = cp.zeros_like(self.conc)
             for dim in range(1, 4):
@@ -194,31 +211,23 @@ class PeriodicSolver(Solver):
                     out += cp.roll(self.conc, dr, dim)
             out = out[:, 2:-2]
             out /= self.nn
-            if iter % 10 == 0:
+            if self.iter % 50 == 0:
                 lt = abs(cp.sum(out[:, 0]) - self.ph_top)
                 lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
-                self.check_convergence(lt, lb, iter)
+                self.converged = self.check_convergence(lt, lb, verbose, conv_crit, start, iter_limit)
             out -= self.conc[:, 2:-2]
-            out *= self.cb[iter % 2]
+            out *= self.cb[self.iter % 2]
             self.conc[:, 2:-2] += out
-            iter += 1
-            if iter == self.iter_limit:
-                print('Did not converge in the iteration limit')
-                return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
-        iter = int(iter/2)
-        if self.verbose:
-            print('converged to:', cp.around(lt * self.L_A * 2, 6),
-                  'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
-                  'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
-        return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+            self.iter += 1
+        return self.converged
 
-    def check_vertical_flux(self):
+    def check_vertical_flux(self, conv_crit):
         vert_flux = abs(self.conc - cp.roll(self.conc, 1, 1))
         vert_flux[self.conc == 0] = 0
         vert_flux[cp.roll(self.conc, 1, 1) == 0] = 0
-        fl = cp.mean(vert_flux, (0, 2, 3))[3:-2]
-        err = fl.max() - fl.min()
-        if err < 1*10**-5:
+        fl = cp.sum(vert_flux, (0, 2, 3))[3:-2]
+        err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
+        if err < conv_crit:
             return True
 
     def flux_map(self):
@@ -236,5 +245,34 @@ class PeriodicSolver(Solver):
         img = self.conc[0, 2:-2, :, 1].get()
         img[self.cpu_img[0, :, :, 0] == 0] = -1
         plt.imshow(img)
+
+import tifffile
+from metrics import *
+img = tifffile.imread('../PeriodicVerticalMirror.tif').astype(np.int)
+img = img [:, :, :]
+img[img==0]=-1
+img[img!=-1] = 0
+img[img==-1] = 1
+img = np.swapaxes(img, 1, 0)
+taus = {}
+# im = np.random.randint(0, 2, (250, 250, 250))
+convergence = []
+for bc in [(-0.5, 0.5)]:
+    for precision in [cp.single, cp.double]:
+        tau = []
+        for h in [16, 24, 32]:
+            print(h, bc, precision)
+            im = np.tile(img, (h, 1, 1))
+            # im = np.ones((100,100,100))
+            s = PeriodicSolver(im, bc=bc, precision=precision)
+            d = s.solve(verbose='per_iter', iter_limit=1000)
+            convergence.append(s.converged)
+            vf = volume_fraction(im)[1]
+            tau.append(vf/d)
+            taus['{}_{}'.format(bc, precision)] = tau
+for key in taus.keys():
+    plt.plot(taus[key], labeL=key)
+plt.xticks(ticks=[a for a in range(7)], labels=['128', '256', '512', '768', '1024', '1536', '2048'],)
+plt.legend()
 
 
