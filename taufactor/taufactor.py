@@ -48,10 +48,8 @@ class Solver:
         vec = vec.repeat(y, -2)
         vec = vec.repeat(bs, 0)
         vec = vec.astype(self.precision)
-        img1 = cp.array(img)
-        img1[img1 > 1] = 1
 
-        return self.pad(img1 * vec, [self.top_bc * 2, self.bot_bc * 2])
+        return self.pad(img * vec, [self.top_bc * 2, self.bot_bc * 2])
 
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))
@@ -161,7 +159,7 @@ class Solver:
         vert_flux[self.conc[:, 1:-1, 1:-1, 1:-1] == 0] = 0
         fl = cp.sum(vert_flux, (0, 2, 3))[1:-1]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit:
+        if err < conv_crit or err == cp.nan:
             return True
         return False
 
@@ -228,7 +226,7 @@ class PeriodicSolver(Solver):
         vert_flux[cp.roll(self.conc, 1, 1) == 0] = 0
         fl = cp.sum(vert_flux, (0, 2, 3))[3:-2]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit:
+        if err < conv_crit or np.isnan(err):
             return True
 
     def flux_map(self):
@@ -295,7 +293,9 @@ class MultiPhaseSolver(Solver):
         vec = vec.repeat(y, -2)
         vec = vec.repeat(bs, 0)
         vec = vec.astype(self.precision)
-        return self.pad((img/img) * vec, [self.top_bc, self.bot_bc])
+        img1 = cp.array(img)
+        img1[img1 > 1] = 1
+        return self.pad(img1 * vec, [self.top_bc, self.bot_bc])
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
         """
@@ -326,7 +326,7 @@ class MultiPhaseSolver(Solver):
             loss, flux = self.check_vertical_flux(conv_crit)
             if verbose=='per_iter':
                 print(loss)
-            if loss < conv_crit:
+            if loss < conv_crit or np.isnan(loss):
                 self.converged = True
                 iter = int(self.iter / 2) + 1
                 if verbose:
@@ -363,16 +363,10 @@ class MultiPhaseSolver(Solver):
 x = 100
 img = np.ones([x, x, x])
 img[50:] = 2
+img[:, :20] = 0
 img[:, 50:] = 1
-# img[:, 30:35] = 1
-# img[:, 65:70] = 1
-
-# img[:, 50:] = 1
-# img[:3] = 0
-# img[4:] = 0
 s = MultiPhaseSolver(img, (1, 1*10**-4))
 s.solve(verbose = 'per_iter', conv_crit=0.02)
 img[img==2] = 0
 s = Solver(img)
 s.solve(verbose = 'per_iter')
-
