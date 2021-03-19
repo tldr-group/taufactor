@@ -111,12 +111,12 @@ class Solver:
             if self.iter % 20 == 0:
                 lt = abs(cp.sum(out[:, 0]) - self.ph_top)
                 lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
-                self.converged = self.check_convergence(lt, lb, verbose, conv_crit, start, iter_limit)
+                self.converged, D_rel = self.check_convergence(lt, lb, verbose, conv_crit, start, iter_limit)
             out -= self.crop(self.conc, 1)
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
             self.iter += 1
-        return self.converged
+        return D_rel
 
 
     def check_convergence(self, lt, lb, verbose, conv_crit, start, iter_limit):
@@ -135,7 +135,7 @@ class Solver:
                         print('converged to:', cp.around(lt * self.L_A * 2, 6),
                               'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
                               'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
-                    return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+                    return True, ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
             else:
                 self.semi_converged = True
         else:
@@ -151,7 +151,9 @@ class Solver:
                 self.precision = cp.double
             else:
                 print('Did not converge in the iteration limit')
-                return ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+                return False, ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+        
+        return False, False
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]
@@ -159,14 +161,16 @@ class Solver:
         vert_flux[self.conc[:, 1:-1, 1:-1, 1:-1] == 0] = 0
         fl = cp.sum(vert_flux, (0, 2, 3))[1:-1]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or err == cp.nan:
+        if err < conv_crit or np.isnan(err).item():
             return True
         return False
 
     def conc_map(self):
-        img = self.conc[0, 1:-1, 1:-1, 1].get()
-        img[self.cpu_img[0, :, :, 0] == 0] = -1
-        plt.imshow(img)
+        img = self.conc[0, 1:-1, 1:-1, 1:-1].get()
+        img[self.cpu_img[0, :, :, :] == 0] = -1
+        plt.imshow(img[:,:,0])
+        plt.show()
+        return img
 
     def flux_map(self):
         flux = cp.zeros_like(self.conc)
@@ -314,11 +318,11 @@ class MultiPhaseSolver(Solver):
                   self.conc[:, 1:-1, 1:-1, :-2] * self.pre_factors[5][:, 1:-1, 1:-1, :-2]
             out /= self.nn
             if self.iter % 20 == 0:
-                self.converged = self.check_convergence(verbose, conv_crit, start, iter_limit)
+                self.converged, D_rel = self.check_convergence(verbose, conv_crit, start, iter_limit)
             out -= self.crop(self.conc, 1)
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
-        return self.converged
+        return D_rel
 
     def check_convergence(self, verbose, conv_crit, start, iter_limit):
         # print progress
@@ -326,14 +330,14 @@ class MultiPhaseSolver(Solver):
             loss, flux = self.check_vertical_flux(conv_crit)
             if verbose=='per_iter':
                 print(loss)
-            if loss < conv_crit or np.isnan(loss):
+            if loss < conv_crit or np.isnan(loss).item():
                 self.converged = True
                 iter = int(self.iter / 2) + 1
                 if verbose:
                     print('converged to:', cp.around(flux, 6),
                           'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
                           'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
-                return flux.get()
+                return True, flux.get()
 
         # increase precision to double if currently single
         if self.iter >= iter_limit:
@@ -345,7 +349,9 @@ class MultiPhaseSolver(Solver):
                 self.precision = cp.double
             else:
                 print('Did not converge in the iteration limit')
-                return flux.get()
+                return False, flux.get()
+
+        return False, False
 
 
     def check_vertical_flux(self, conv_crit):
@@ -354,19 +360,3 @@ class MultiPhaseSolver(Solver):
         fl = cp.sum(vert_flux, (0, 2, 3))
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         return err, fl.mean()
-
-
-
-
-
-# img = np.random.randint(0, 3, (5, 5, 5))
-x = 100
-img = np.ones([x, x, x])
-img[50:] = 2
-img[:, :20] = 0
-img[:, 50:] = 1
-s = MultiPhaseSolver(img, (1, 1*10**-4))
-s.solve(verbose = 'per_iter', conv_crit=0.02)
-img[img==2] = 0
-s = Solver(img)
-s.solve(verbose = 'per_iter')
