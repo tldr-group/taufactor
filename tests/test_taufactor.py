@@ -7,6 +7,7 @@ import taufactor as tau
 from taufactor.metrics import volume_fraction, surface_area
 from tests.utils import *
 import numpy as np
+import matplotlib.pyplot as plt
 
 #  Testing the main solver
 
@@ -22,8 +23,8 @@ def test_solver_on_empty_block():
     """Run solver on a block of zeros."""
     l=20
     img = np.zeros([l,l, l]).reshape(1, l, l, l)
-    S = tau.Solver(img, iter_limit=1000)
-    t = S.solve()
+    S = tau.Solver(img)
+    t = S.solve(verbose='per_iter', iter_limit=1000)
     assert t==0.0
 
 
@@ -133,3 +134,72 @@ def test_surface_area_interfactial_3ph():
     img[2] = 2
     sa = surface_area(img, phases=[1, 2])
     assert sa==1/6
+
+def test_multiphase_and_solver_agree():
+    x = 100
+    img = np.ones([x, x, x])
+    img[50:] = 2
+    img[:, :20] = 0
+    img[:, 50:] = 1
+    s = tau.MultiPhaseSolver(img, (1, 1*10**-4))
+    mph = s.solve(verbose = 'per_iter', conv_crit=0.02)
+    img[img==2] = 0
+    s = tau.Solver(img)
+    s.solve(verbose = 'per_iter')
+
+    vert_flux = s.conc[:, 1:-1, 1:-1, 1:-1] - s.conc[:, :-2, 1:-1, 1:-1]
+    vert_flux[s.conc[:, :-2, 1:-1, 1:-1] == 0] = 0
+    vert_flux[s.conc[:, 1:-1, 1:-1, 1:-1] == 0] = 0
+    fl = cp.sum(vert_flux, (0, 2, 3))[1:-1]
+    err = (fl.mean().get() - mph*2)/(fl.mean().get() + mph)
+
+    assert err< 0.02
+
+def test_mphsolver_on_empty_block():
+    """Run solver on a block of zeros."""
+    l=20
+    img = np.zeros([l,l, l]).reshape(1, l, l, l)
+    S = tau.MultiPhaseSolver(img)
+    t = S.solve(iter_limit=1000)
+    assert t==0.0
+
+def test_mphsolver_on_ones_block():
+    """Run solver on a block of ones."""
+    l=20
+    img = np.ones([l,l, l]).reshape(1, l, l, l)
+    S = tau.MultiPhaseSolver(img)
+    t = S.solve(iter_limit=1000)
+    assert abs(l**2/t-(l+1))<0.01
+
+def test_mphsolver_on_halves():
+    """Run solver on a block of halbes."""
+    l=20
+    img = np.ones([l,l, l]).reshape(1, l, l, l)
+    cond = 0.5
+    S = tau.MultiPhaseSolver(img, (cond,cond))
+    t = S.solve(iter_limit=1000)
+    print(t)
+    assert abs((l**2)*cond/t-(l+1))<0.01
+
+def test_mphsolver_on_strip_of_ones():
+    """Run solver on a strip of ones, 1/4 volume of total"""
+    l=20
+    img = np.zeros([l,l, l]).reshape(1, l, l, l)
+    x=10
+    img[:,:,0:x,0:x]=1
+    S = tau.MultiPhaseSolver(img)
+    t = S.solve()
+    assert abs(x**2/t-(l+1))<0.01
+
+def test_mphsolver_on_strip_of_ones_and_twos():
+    """Run solver on a strip of ones, 1/4 volume of total"""
+    l=20
+    img = np.zeros([l,l, l]).reshape(1, l, l, l)
+    x=10
+    img[:,:,0:x,0:x]=1
+    img[:,:,0:x,x:l]=2
+    cond = (1, 0.5)
+    S = tau.MultiPhaseSolver(img, cond)
+    t = S.solve()
+    assert abs(t-(cond[0]+cond[1])*x**2/(l+1))<0.01
+    
