@@ -37,6 +37,11 @@ class Solver:
         self.iter=0
         img = None
 
+        # Results
+        self.tau=None
+        self.D_eff=None
+        self.D_mean=None
+
     def init_conc(self, img):
         bs, x, y, z = img.shape
         sh = 1 / (x * 2)
@@ -93,7 +98,7 @@ class Solver:
     def crop(self, img, c = 1):
         return img[:, c:-c, c:-c, c:-c]
 
-    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, D_0=1):
         """
         iteratively converge the vol
         :param iters: number of steps
@@ -116,8 +121,11 @@ class Solver:
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
             self.iter += 1
-        return D_rel
-
+        
+        self.D_mean=D_0
+        self.tau=self.VF/D_rel
+        self.D_eff=self.D_mean*D_rel
+        return self.tau
 
     def check_convergence(self, lt, lb, verbose, conv_crit, start, iter_limit):
         loss = lt - lb
@@ -200,7 +208,7 @@ class PeriodicSolver(Solver):
         nn[nn == 0] = cp.inf
         return nn
 
-    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, D_0=1):
         """
         iteratively converge the vol
         :param iters: number of steps
@@ -217,12 +225,16 @@ class PeriodicSolver(Solver):
             if self.iter % 50 == 0:
                 lt = abs(cp.sum(out[:, 0]) - self.ph_top)
                 lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
-                self.converged = self.check_convergence(lt, lb, verbose, conv_crit, start, iter_limit)
+                self.converged, D_rel = self.check_convergence(lt, lb, verbose, conv_crit, start, iter_limit)
             out -= self.conc[:, 2:-2]
             out *= self.cb[self.iter % 2]
             self.conc[:, 2:-2] += out
             self.iter += 1
-        return self.converged
+
+        self.D_mean=D_0
+        self.tau=self.VF/D_rel
+        self.D_eff=D_0*D_rel
+        return self.tau
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = abs(self.conc - cp.roll(self.conc, 1, 1))
@@ -250,18 +262,19 @@ class PeriodicSolver(Solver):
         plt.imshow(img)
 
 class MultiPhaseSolver(Solver):
-    def __init__(self, img, cond=(1, 1), precision=cp.single, bc=(-0.5, 0.5)):
-        self.cond = [0.5/c for c in cond]
+    def __init__(self, img, cond={1:1,2:1}, precision=cp.single, bc=(-0.5, 0.5)):
+        self.cond = {ph: 0.5 / c for ph, c in cond.items()}
         super().__init__(img, precision=precision, bc=bc)
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
+        self.VF = {p:np.mean(img==p) for p in np.unique(img)}
 
     def init_nn(self, img):
         #conductivity map
         img2 = cp.zeros_like(img)
-        cmax = max(self.cond)
-        for i, c in enumerate(self.cond, 1):
-            img2[img == i] = c
+        for ph in self.cond:
+            c = self.cond[ph]
+            img2[img == ph] = c
         img2 = self.pad(self.pad(img2))
         img2[:, 1] = img2[:, 2]
         img2[:, -2] = img2[:, -3]
@@ -318,11 +331,17 @@ class MultiPhaseSolver(Solver):
                   self.conc[:, 1:-1, 1:-1, :-2] * self.pre_factors[5][:, 1:-1, 1:-1, :-2]
             out /= self.nn
             if self.iter % 20 == 0:
-                self.converged, D_rel = self.check_convergence(verbose, conv_crit, start, iter_limit)
+                self.converged, self.D_eff = self.check_convergence(verbose, conv_crit, start, iter_limit)
             out -= self.crop(self.conc, 1)
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
-        return D_rel
+        
+        if len(np.array([self.VF[z] for z in self.VF.keys() if z!=0]))>0:
+            self.D_mean=np.sum(np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z!=0]))
+        else:
+            self.D_mean=0
+        self.tau = self.D_mean/self.D_eff
+        return self.tau
 
     def check_convergence(self, verbose, conv_crit, start, iter_limit):
         # print progress
@@ -333,6 +352,8 @@ class MultiPhaseSolver(Solver):
             if loss < conv_crit or np.isnan(loss).item():
                 self.converged = True
                 iter = int(self.iter / 2) + 1
+                b, x, y, z = self.cpu_img.shape
+                flux *= (x+1)/(y*z)
                 if verbose:
                     print('converged to:', cp.around(flux, 6),
                           'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
