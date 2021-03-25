@@ -27,7 +27,7 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 Before installing taufactor, download the most recent version of CuPy:
 https://docs.cupy.dev/en/stable/install.html
 
-# Basic Usage
+# Quickstart
 A basic example for taufactor:
 ```python
 import taufactor as tau
@@ -41,18 +41,13 @@ img[img != 1] = 0
 # create a solver object
 s = tau.Solver(img)
 # call solve function
-D_rel = s.solve()
-```
+tau = s.solve()
+# view effective diffusivity
+D_eff = s.D_eff
+# plot steady state maps
+s.flux_map()
+s.conc_map()
 
-We can also use the periodic solver
-
-```python
-import taufactor as tau
-
-# create a periodic solver object and set an iteration limit
-s = tau.PeriodicSolver(img, iter_limit=1000)
-# call solve function
-D_rel = s.solve()
 ```
 
 # Tests
