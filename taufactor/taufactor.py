@@ -121,10 +121,13 @@ class Solver:
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
             self.iter += 1
-        
         self.D_mean=D_0
-        self.tau=self.VF/D_rel
+        self.tau=self.VF/D_rel if D_rel != 0 else cp.inf
         self.D_eff=self.D_mean*D_rel
+        if verbose:
+            print('converged to:', self.tau,
+                  'after: ', self.iter, 'iterations in: ', np.around(timer() - start, 4),
+                  'seconds at a rate of', np.around((timer() - start)/self.iter, 4), 's/iter')
         return self.tau
 
     def check_convergence(self, lt, lb, verbose, conv_crit, start, iter_limit):
@@ -137,12 +140,10 @@ class Solver:
         # check for convergence if loss is good
         if abs(loss) < conv_crit * 0.01:
             if self.semi_converged:
-                if self.check_vertical_flux(conv_crit):
-                    iter = int(self.iter / 2)
-                    if verbose:
-                        print('converged to:', cp.around(lt * self.L_A * 2, 6),
-                              'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
-                              'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
+                cvf = self.check_vertical_flux(conv_crit)
+                if cvf:
+                    if cvf == 'zero_flux':
+                        return True, 0
                     return True, ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
             else:
                 self.semi_converged = True
@@ -159,8 +160,8 @@ class Solver:
                 self.precision = cp.double
             else:
                 print('Did not converge in the iteration limit')
-                return False, ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
-        
+                return True, ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+
         return False, False
 
     def check_vertical_flux(self, conv_crit):
@@ -171,16 +172,18 @@ class Solver:
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if err < conv_crit or np.isnan(err).item():
             return True
+        if fl.min() == 0:
+            return 'zero_flux'
         return False
 
-    def conc_map(self):
+    def conc_map(self, lay=0):
         img = self.conc[0, 1:-1, 1:-1, 1:-1].get()
         img[self.cpu_img[0, :, :, :] == 0] = -1
-        plt.imshow(img[:,:,0])
+        plt.imshow(img[:, :, lay])
         plt.show()
         return img
 
-    def flux_map(self):
+    def flux_map(self, lay=0):
         flux = cp.zeros_like(self.conc)
         ph_map = self.pad(cp.array(self.cpu_img))
         for dim in range(1, 4):
@@ -188,13 +191,15 @@ class Solver:
                 flux += abs(cp.roll(self.conc, dr, dim) - self.conc) * cp.roll(ph_map, dr, dim)
         flux = flux[0, 1:-1, 1:-1, 1:-1].get()
         flux[self.cpu_img[0] == 0] = 0
-        plt.imshow(flux[:, :, 0])
+        plt.imshow(flux[:, :, lay])
         return flux
 
 class PeriodicSolver(Solver):
+
     def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5)):
         super().__init__(img, precision=precision, bc = bc)
         self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2]
+
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))[:, :, 2:-2, 2:-2]
         nn = cp.zeros_like(img2, dtype=self.precision)
@@ -232,8 +237,12 @@ class PeriodicSolver(Solver):
             self.iter += 1
 
         self.D_mean=D_0
-        self.tau=self.VF/D_rel
+        self.tau = self.VF/D_rel if D_rel !=0 else cp.inf
         self.D_eff=D_0*D_rel
+        if verbose:
+            print('converged to:', self.tau,
+                  'after: ', self.iter, 'iterations in: ', np.around(timer() - start, 4),
+                  'seconds at a rate of', np.around((timer() - start)/self.iter, 4), 's/iter')
         return self.tau
 
     def check_vertical_flux(self, conv_crit):
@@ -244,8 +253,10 @@ class PeriodicSolver(Solver):
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if err < conv_crit or np.isnan(err):
             return True
+        if fl.min() == 0:
+            return 'zero_flux'
 
-    def flux_map(self):
+    def flux_map(self, lay=0):
         flux = cp.zeros_like(self.conc)
         ph_map = self.pad(self.pad(cp.array(self.cpu_img)))[:, :, 2:-2, 2:-2]
         for dim in range(1, 4):
@@ -253,16 +264,19 @@ class PeriodicSolver(Solver):
                 flux += abs(cp.roll(self.conc, dr, dim) - self.conc) * cp.roll(ph_map, dr, dim)
         flux = flux[0, 2:-2].get()
         flux[self.cpu_img[0] == 0] = 0
-        plt.imshow(flux[:, :, 0])
+        plt.imshow(flux[:, :, lay])
         return flux
 
-    def conc_map(self):
-        img = self.conc[0, 2:-2, :, 1].get()
-        img[self.cpu_img[0, :, :, 0] == 0] = -1
-        plt.imshow(img)
+    def conc_map(self, lay=0):
+        img = self.conc[0, 2:-2].get()
+        img[self.cpu_img[0] == 0] = -1
+        plt.imshow(img[:, :, lay])
+        plt.show()
 
 class MultiPhaseSolver(Solver):
     def __init__(self, img, cond={1:1,2:1}, precision=cp.single, bc=(-0.5, 0.5)):
+        if 0 in cond.values():
+            raise ValueError('0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
         super().__init__(img, precision=precision, bc=bc)
         self.pre_factors = self.nn[1:]
@@ -335,12 +349,16 @@ class MultiPhaseSolver(Solver):
             out -= self.crop(self.conc, 1)
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
-        
+
         if len(np.array([self.VF[z] for z in self.VF.keys() if z!=0]))>0:
             self.D_mean=np.sum(np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z!=0]))
         else:
             self.D_mean=0
-        self.tau = self.D_mean/self.D_eff
+        self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else cp.inf
+        if verbose:
+            print('converged to:', self.tau,
+                  'after: ', self.iter, 'iterations in: ', np.around(timer() - start, 4),
+                  'seconds at a rate of', np.around((timer() - start)/self.iter, 4), 's/iter')
         return self.tau
 
     def check_convergence(self, verbose, conv_crit, start, iter_limit):
@@ -349,15 +367,10 @@ class MultiPhaseSolver(Solver):
             loss, flux = self.check_vertical_flux(conv_crit)
             if verbose=='per_iter':
                 print(loss)
-            if loss < conv_crit or np.isnan(loss).item():
+            if abs(loss) < conv_crit or np.isnan(loss).item():
                 self.converged = True
-                iter = int(self.iter / 2) + 1
                 b, x, y, z = self.cpu_img.shape
                 flux *= (x+1)/(y*z)
-                if verbose:
-                    print('converged to:', cp.around(flux, 6),
-                          'after: ', iter, 'iterations in: ', np.around(timer() - start, 4),
-                          'seconds at a rate of', np.around((timer() - start)/iter, 4), 's/iter')
                 return True, flux.get()
 
         # increase precision to double if currently single
@@ -370,14 +383,23 @@ class MultiPhaseSolver(Solver):
                 self.precision = cp.double
             else:
                 print('Did not converge in the iteration limit')
-                return False, flux.get()
-
+                return True, flux.get()
         return False, False
-
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = (self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]) * self.pre_factors[1][:, :-2, 1:-1, 1:-1]
         vert_flux[self.nn == cp.inf] = 0
         fl = cp.sum(vert_flux, (0, 2, 3))
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
+        if abs(fl).min()==0:
+            return 0, cp.array([0], dtype=self.precision)
         return err, fl.mean()
+
+img = np.zeros([64,64,64])
+img[32:, :] = 1
+# img[:, 32:, :] = 2
+# img[32:, 32:, :] = 3
+s = MultiPhaseSolver(img, cond={1:1, 2:2, 3:3})
+# tau = s.solve()
+# s = PeriodicSolver(img)
+s.solve()
