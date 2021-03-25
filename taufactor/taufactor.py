@@ -5,8 +5,22 @@ from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 
 class Solver:
-    def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5)):
+    """
+    Default solver for two phase images. Once solve method is
+    called, tau, D_eff and D_rel are available as attributes.
+    """
+    def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5), D_0=1):
+        """
+        Initialise parameters, conc map and other tools that can be re-used
+        for multiple solves.
+
+        :param img: input img with 1s conductive and 0s non-conductive
+        :param precision:  cp.single or cp.double
+        :param bc: Upper and lower boundary conditions. Leave as default.
+        :param D_0: reference material diffusivity
+        """
         # add batch dim now for consistency
+        self.D_0 = D_0
         self.top_bc, self.bot_bc = bc
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
@@ -79,12 +93,6 @@ class Solver:
         return [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
 
     def pad(self, img, vals=[0] * 6):
-        """
-        adds padding
-        :param img: image to pad
-        :param vals: list of values to pad given as [x+, x-, y+, y-, z+, z-]
-        :return: padded image
-        """
         while len(vals) < 6:
             vals.append(0)
         to_pad = [1]*8
@@ -98,11 +106,16 @@ class Solver:
     def crop(self, img, c = 1):
         return img[:, c:-c, c:-c, c:-c]
 
-    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, D_0=1):
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
         """
-        iteratively converge the vol
-        :param iters: number of steps
-        :return:
+        run a solve simulation
+
+        :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
+        if initialised as singles
+        :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
+        :param conv_crit: convergence criteria, minimum percent difference between
+        max and min flux through a given layer
+        :return: tau
         """
         start = timer()
         while not self.converged:
@@ -121,7 +134,7 @@ class Solver:
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
             self.iter += 1
-        self.D_mean=D_0
+        self.D_mean = self.D_0
         self.tau=self.VF/D_rel if D_rel != 0 else cp.inf
         self.D_eff=self.D_mean*D_rel
         if verbose:
@@ -177,6 +190,11 @@ class Solver:
         return False
 
     def conc_map(self, lay=0):
+        """
+        Plots a concentration map perpendicular to the direction of flow
+        :param lay: depth to plot
+        :return: 3D conc map
+        """
         img = self.conc[0, 1:-1, 1:-1, 1:-1].get()
         img[self.cpu_img[0, :, :, :] == 0] = -1
         plt.imshow(img[:, :, lay])
@@ -184,20 +202,38 @@ class Solver:
         return img
 
     def flux_map(self, lay=0):
+        """
+        Plots a flux map perpendicular to the direction of flow
+        :param lay: depth to plot
+        :return: 3D flux map
+        """
         flux = cp.zeros_like(self.conc)
         ph_map = self.pad(cp.array(self.cpu_img))
         for dim in range(1, 4):
             for dr in [1, -1]:
                 flux += abs(cp.roll(self.conc, dr, dim) - self.conc) * cp.roll(ph_map, dr, dim)
-        flux = flux[0, 1:-1, 1:-1, 1:-1].get()
-        flux[self.cpu_img[0] == 0] = 0
+        flux = flux[0, 2:-2, 1:-1, 1:-1].get()
+        flux[self.cpu_img[0, 1:-1] == 0] = 0
         plt.imshow(flux[:, :, lay])
         return flux
 
 class PeriodicSolver(Solver):
+    """
+    Periodic Solver (works for non-periodic structures, but has higher RAM requirements)
+    Once solve method is called, tau, D_eff and D_rel are available as attributes.
+    """
+    def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5), D_0=1):
+        """
+        Initialise parameters, conc map and other tools that can be re-used
+        for multiple solves.
 
-    def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5)):
-        super().__init__(img, precision=precision, bc = bc)
+        :param img: input img with 1s conductive and 0s non-conductive
+        :param precision:  cp.single or cp.double
+        :param bc: Upper and lower boundary conditions. Leave as default.
+        :param D_0: reference material diffusivity
+
+        """
+        super().__init__(img, precision, bc, D_0)
         self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2]
 
     def init_nn(self, img):
@@ -215,9 +251,14 @@ class PeriodicSolver(Solver):
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, D_0=1):
         """
-        iteratively converge the vol
-        :param iters: number of steps
-        :return:
+        run a solve simulation
+
+        :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
+        if initialised as singles
+        :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
+        :param conv_crit: convergence criteria, minimum percent difference between
+        max and min flux through a given layer
+        :return: tau
         """
         start = timer()
         while not self.converged:
@@ -257,6 +298,11 @@ class PeriodicSolver(Solver):
             return 'zero_flux'
 
     def flux_map(self, lay=0):
+        """
+        Plots a flux map perpendicular to the direction of flow
+        :param lay: depth to plot
+        :return: 3D flux map
+        """
         flux = cp.zeros_like(self.conc)
         ph_map = self.pad(self.pad(cp.array(self.cpu_img)))[:, :, 2:-2, 2:-2]
         for dim in range(1, 4):
@@ -268,17 +314,38 @@ class PeriodicSolver(Solver):
         return flux
 
     def conc_map(self, lay=0):
+        """
+        Plots a concentration map perpendicular to the direction of flow
+        :param lay: depth to plot
+        :return: 3D conc map
+        """
         img = self.conc[0, 2:-2].get()
         img[self.cpu_img[0] == 0] = -1
         plt.imshow(img[:, :, lay])
         plt.show()
 
 class MultiPhaseSolver(Solver):
-    def __init__(self, img, cond={1:1,2:1}, precision=cp.single, bc=(-0.5, 0.5)):
+    """
+    Multi=phase solver for two phase images. Once solve method is
+    called, tau, D_eff and D_rel are available as attributes.
+    """
+    def __init__(self, img, cond={1:1}, precision=cp.single, bc=(-0.5, 0.5)):
+        """
+        Initialise parameters, conc map and other tools that can be re-used
+        for multiple solves.
+
+        :param img: input img with n conductive phases labelled as integers, and 0s for non-conductive
+        :param cond: dict with n phase labels as keys, and their corresponding conductivities as values e.g
+        for a 2 phase material, {1:0.543, 2: 0.420}, with 1s and 2s in the input img
+        :param precision:  cp.single or cp.double
+        :param bc: Upper and lower boundary conditions. Leave as default.
+        :param D_0: reference material diffusivity
+        """
+
         if 0 in cond.values():
             raise ValueError('0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
-        super().__init__(img, precision=precision, bc=bc)
+        super().__init__(img, precision, bc)
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
         self.VF = {p:np.mean(img==p) for p in np.unique(img)}
@@ -330,10 +397,16 @@ class MultiPhaseSolver(Solver):
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
         """
-        iteratively converge the vol
-        :param iters: number of steps
-        :return:
+        run a solve simulation
+
+        :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
+        if initialised as singles
+        :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
+        :param conv_crit: convergence criteria, minimum percent difference between
+        max and min flux through a given layer
+        :return: tau
         """
+
         start = timer()
         while not self.converged:
             self.iter += 1
@@ -395,11 +468,11 @@ class MultiPhaseSolver(Solver):
             return 0, cp.array([0], dtype=self.precision)
         return err, fl.mean()
 
-img = np.zeros([64,64,64])
+img = np.ones([64,64,64])
 img[32:, :] = 1
 # img[:, 32:, :] = 2
 # img[32:, 32:, :] = 3
-s = MultiPhaseSolver(img, cond={1:1, 2:2, 3:3})
+s = Solver(img)
 # tau = s.solve()
 # s = PeriodicSolver(img)
 s.solve()
