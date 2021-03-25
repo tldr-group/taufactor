@@ -2,6 +2,14 @@
 History
 =======
 
+0.1.2 (2021-03-25)
+------------------
+
+* Added multi-phase and periodic solvers and metrics calculations
+
+------------------
+
+
 0.1.1 (2021-02-10)
 ------------------
 

@@ -1,3 +1,12 @@
+# TauFactor
+TauFactor is an application for calculating tortuosity factors from tomographic data. TauFactor uses [CuPy](https://cupy.dev/) which is an implementation of NumPy-compatible multi-dimensional array on CUDA.
+
+* Free software: MIT license
+* Documentation: https://taufactor.readthedocs.io.
+
+<p align="center">
+<img src="https://tldr-group.github.io/static/media/tau_example.685a0640.png" alt="TauFactor" width="324" height="324">
+</p>
 <p align="center">
 <a href="https://pypi.python.org/pypi/taufactor">
         <img src="https://img.shields.io/pypi/v/taufactor.svg"
@@ -13,21 +22,12 @@
             alt="MIT LICENSE"></a>
 </p>
 
-# TauFactor
-TauFactor is an application for calculating tortuosity factors from tomographic data. TauFactor uses CuPy_ which is an implementation of NumPy-compatible multi-dimensional array on CUDA.
-
-* Free software: MIT license
-* Documentation: https://taufactor.readthedocs.io.
-
-
-<img src="docs/tau_example.png" width="324" height="324">
-
 # Requirements
 **You will need an NVIDIA GPU to use this distribution of taufactor.** <br />
 Before installing taufactor, download the most recent version of CuPy:
 https://docs.cupy.dev/en/stable/install.html
 
-# Usage
+# Quickstart
 A basic example for taufactor:
 ```python
 import taufactor as tau
@@ -41,21 +41,27 @@ img[img != 1] = 0
 # create a solver object
 s = tau.Solver(img)
 # call solve function
-D_rel = s.solve()
+tau = s.solve()
+# view effective diffusivity
+D_eff = s.D_eff
+# plot steady state maps
+s.flux_map()
+s.conc_map()
+
 ```
 
-We can also use the periodic solver
+# Tests
 
-```python
-import taufactor as tau
+To run unit tests navigate to the root directory and run
 
-# create a periodic solver object and set an iteration limit
-s = tau.PeriodicSolver(img, iter_limit=1000)
-# call solve function
-D_rel = s.solve()
 ```
+pytest
+```
+
+
 # Credits
 
+This package was created by the tldr group at the Dyson School of Design Engineering, Imperial College London.
 This package was created with Cookiecutter_ and the `audreyr/cookiecutter-pypackage`_ project template.
 
 .. _Cookiecutter: https://github.com/audreyr/cookiecutter

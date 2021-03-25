@@ -103,3 +103,8 @@ ENV/
 
 # IDE settings
 .vscode/
+/twod_nmc.npy
+/xy_128_rep_32.tif.npy
+/xy_352_rep_49.tif.npy
+/precision_tests.py
+/PeriodicVerticalMirror.tif
