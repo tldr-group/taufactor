@@ -467,12 +467,3 @@ class MultiPhaseSolver(Solver):
         if abs(fl).min()==0:
             return 0, cp.array([0], dtype=self.precision)
         return err, fl.mean()
-
-img = np.ones([64,64,64])
-img[32:, :] = 1
-# img[:, 32:, :] = 2
-# img[32:, 32:, :] = 3
-s = Solver(img)
-# tau = s.solve()
-# s = PeriodicSolver(img)
-s.solve()
