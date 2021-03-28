@@ -1,3 +1,5 @@
 numpy
 cupy
 scipy
+matplotlib
+m2r2
