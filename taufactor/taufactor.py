@@ -138,7 +138,7 @@ class Solver:
         self.tau=self.VF/D_rel if D_rel != 0 else cp.inf
         self.D_eff=self.D_mean*D_rel
         if verbose:
-            print('converged to:', self.tau,
+            print('tau:', self.tau,
                   'after: ', self.iter, 'iterations in: ', np.around(timer() - start, 4),
                   'seconds at a rate of', np.around((timer() - start)/self.iter, 4), 's/iter')
         return self.tau
@@ -429,7 +429,7 @@ class MultiPhaseSolver(Solver):
             self.D_mean=0
         self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else cp.inf
         if verbose:
-            print('converged to:', self.tau,
+            print('tau:', self.tau,
                   'after: ', self.iter, 'iterations in: ', np.around(timer() - start, 4),
                   'seconds at a rate of', np.around((timer() - start)/self.iter, 4), 's/iter')
         return self.tau
@@ -446,17 +446,19 @@ class MultiPhaseSolver(Solver):
                 flux *= (x+1)/(y*z)
                 return True, flux.get()
 
-        # increase precision to double if currently single
-        if self.iter >= iter_limit:
-            if self.precision == cp.single:
-                print('increasing precision to double')
-                self.iter = 0
-                self.conc = cp.array(self.conc, dtype=cp.double)
-                self.nn = cp.array(self.nn, dtype=cp.double)
-                self.precision = cp.double
-            else:
-                print('Did not converge in the iteration limit')
-                return True, flux.get()
+            # increase precision to double if currently single
+            if self.iter >= iter_limit:
+                if self.precision == cp.single:
+                    print('increasing precision to double')
+                    self.iter = 0
+                    self.conc = cp.array(self.conc, dtype=cp.double)
+                    self.nn = cp.array(self.nn, dtype=cp.double)
+                    self.precision = cp.double
+                else:
+                    print('Did not converge in the iteration limit')
+                    b, x, y, z = self.cpu_img.shape
+                    flux *= (x+1)/(y*z)
+                    return True, flux.get()
         return False, False
 
     def check_vertical_flux(self, conv_crit):
