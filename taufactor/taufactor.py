@@ -206,22 +206,27 @@ class Solver:
             return 'zero_flux'
         return False
 
-    def conc_map(self, lay=0):
+    def conc_map(self, lay=0, filename=None):
         """
         Plots a concentration map perpendicular to the direction of flow
         :param lay: depth to plot
+        :param filename: filename under which to save the image, default None does not save
         :return: 3D conc map
         """
         img = self.conc[0, 1:-1, 1:-1, 1:-1].get()
         img[self.cpu_img[0, :, :, :] == 0] = -1
         plt.imshow(img[:, :, lay])
-        plt.show()
+        if filename:
+            plt.savefig(filename)
+        else:
+            plt.show()
         return img
 
-    def flux_map(self, lay=0):
+    def flux_map(self, lay=0, filename=None):
         """
         Plots a flux map perpendicular to the direction of flow
         :param lay: depth to plot
+        :param filename: filename under which to save the image, default None does not save
         :return: 3D flux map
         """
         flux = cp.zeros_like(self.conc)
@@ -233,6 +238,10 @@ class Solver:
         flux = flux[0, 2:-2, 1:-1, 1:-1].get()
         flux[self.cpu_img[0, 1:-1] == 0] = 0
         plt.imshow(flux[:, :, lay])
+        if filename:
+            plt.savefig(filename)
+        else:
+            plt.show()
         return flux
 
 
