@@ -26,6 +26,18 @@ class Solver:
         self.top_bc, self.bot_bc = bc
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
+        # Check number of phases and correct labelling
+        if len(np.unique(img)) > 2:
+            raise AssertionError(
+                "Attempting to run binary solver on multi-phase image. Either use MultiPhaseSolver for combined effective tortuosity, or re-label phase of interest to 1 and all other phases to 0.")
+        if len(np.unique(img)) == 2:
+            if 1 not in np.unique(img):
+                raise AssertionError(
+                    "Conductive phase must be labelled 1.")
+            if 0 not in np.unique(img):
+                raise AssertionError(
+                    "Non-conductive phase must be labelled 0.")
+
         self.cpu_img = img
         self.precision = precision
         # VF calc
