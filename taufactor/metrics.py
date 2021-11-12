@@ -23,23 +23,30 @@ def volume_fraction(img, phases={}):
         vf_out={}
         for p in phases:
             vf_out[p]=(img==phases[p]).mean().item()
-    
+
     return vf_out
 
 def surface_area(img, phases, periodic=False):
     """
-    Calculate interfacial surface area between two phases or the total surface area of one phase 
+    Calculate interfacial surface area between two phases or the total surface area of one phase
     :param img:
     :param phases: list of phases to calculate SA, if lenght 1 calculate total SA, if length 2 calculate inerfacial SA
     :return: the surface area in faces per unit volume
     """
     shape = img.shape
     dim = len(shape)
+    # finding an int that is not in the img for padding:
+    int_not_in_img = -1
+    while int_not_in_img in img:
+        int_not_in_img -= 1
+
     if periodic:
         pad = [(int(not x),int(not x)) for x in periodic]
-        img = cp.pad(cp.asarray(img), pad, 'constant', constant_values=-1)
+        img = cp.pad(cp.asarray(img), pad, 'constant',
+                     constant_values=int_not_in_img)
     else:
-        img = cp.pad(cp.asarray(img), 1, 'constant', constant_values=-1)
+        img = cp.pad(cp.asarray(img), 1, 'constant',
+                     constant_values=int_not_in_img)
         periodic=[0]*dim
 
     SA_map = cp.zeros_like(img)
