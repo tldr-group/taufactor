@@ -35,18 +35,18 @@ def surface_area(img, phases, periodic=False):
     """
     shape = img.shape
     dim = len(shape)
+    img = cp.asarray(img)
     # finding an int that is not in the img for padding:
-    int_not_in_img = -1
-    while int_not_in_img in img:
-        int_not_in_img -= 1
+    not_in_img = cp.asarray([-1], dtype=img.dtype)
+    while not_in_img in img:
+        not_in_img -= 1
+    int_not_in_img = not_in_img.item()
 
     if periodic:
         pad = [(int(not x),int(not x)) for x in periodic]
-        img = cp.pad(cp.asarray(img), pad, 'constant',
-                     constant_values=int_not_in_img)
+        img = cp.pad(img, pad, 'constant', constant_values=int_not_in_img)
     else:
-        img = cp.pad(cp.asarray(img), 1, 'constant',
-                     constant_values=int_not_in_img)
+        img = cp.pad(img, 1, 'constant', constant_values=int_not_in_img)
         periodic=[0]*dim
 
     SA_map = cp.zeros_like(img)
