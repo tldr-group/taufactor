@@ -1,7 +1,7 @@
 import numpy as np
 import cupy as cp
 
-def volume_fraction(img, phases={}):
+def volume_fraction(img, phases=[]):
     """
     Calculates volume fractions of phases in an image
     :param img: segmented input image with n phases
@@ -12,7 +12,7 @@ def volume_fraction(img, phases={}):
     if type(img) is not type(cp.array(1)):
         img = cp.asarray(img)
 
-    if phases=={}:
+    if list(phases)==[]:
         phases = cp.unique(img)
         vf_out = []
         for p in phases:
