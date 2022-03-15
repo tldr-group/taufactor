@@ -96,7 +96,7 @@ def triple_phase_boundary(img):
             ph_maps.append(ph_map)
         tpb_map = cp.ones_like(img)
         for ph_map in ph_maps:
-            tp_map *= ph_map
+            tpb_map *= ph_map
         tpb_map[tpb_map>1] = 1
         tpb_map = tpb_map[1:-1, 1:-1]
         tpb = np.sum(tpb_map)
