@@ -34,13 +34,12 @@ def surface_area(img, phases, periodic=False):
     :return: the surface area in faces per unit volume
     """
     shape = img.shape
+    int_not_in_img = np.unique(img).min() -1
+
     dim = len(shape)
     img = cp.asarray(img)
     # finding an int that is not in the img for padding:
-    not_in_img = cp.asarray([-1], dtype=img.dtype)
-    while not_in_img in img:
-        not_in_img -= 1
-    int_not_in_img = not_in_img.item()
+    
 
     if periodic:
         pad = [(int(not x),int(not x)) for x in periodic]
