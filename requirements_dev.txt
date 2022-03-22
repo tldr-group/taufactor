@@ -9,4 +9,5 @@ Sphinx==3.4.3
 twine==3.3.0
 Click==7.0
 pytest==4.6.5
+matplotlib==4.3.3
 pytest-runner==5.2

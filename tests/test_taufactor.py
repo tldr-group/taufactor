@@ -4,7 +4,7 @@
 
 import pytest
 import taufactor as tau
-from taufactor.metrics import volume_fraction, surface_area
+from taufactor.metrics import volume_fraction, surface_area, triple_phase_boundary
 from tests.utils import *
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,6 +15,22 @@ def test_solver_on_uniform_block():
     """Run solver on a block of ones."""
     l=20
     img = np.ones([l,l, l]).reshape(1, l, l, l)
+    S = tau.Solver(img)
+    S.solve()
+    assert S.tau==1.0
+
+def test_solver_on_uniform_rectangular_block_solver_dim():
+    """Run solver on a block of ones."""
+    l=20
+    img = np.ones([l*2,l, l]).reshape(1, l*2, l, l)
+    S = tau.Solver(img)
+    S.solve()
+    assert S.tau==1.0
+
+def test_solver_on_uniform_rectangular_block_non_solver_dim():
+    """Run solver on a block of ones."""
+    l=20
+    img = np.ones([l,l, l*2]).reshape(1, l, l, l*2)
     S = tau.Solver(img)
     S.solve()
     assert S.tau==1.0
@@ -163,6 +179,32 @@ def test_surface_area_interfactial_3ph():
     sa = surface_area(img, phases=[1, 2])
     assert sa==1/6
 
+def test_tpb_2d():
+    l = 3
+    img = np.zeros([l, l])
+    img[0] = 1
+    img[:,0] = 2
+    tpb = triple_phase_boundary(img)
+    assert tpb==0.25
+
+def test_tpb_3d_corners():
+    l = 2
+    img = np.zeros([l, l, l])
+    img[0,0,0] = 1
+    img[1,1,1] = 1
+    img[0,1,1] = 2
+    img[1,0,0] = 2
+    tpb = triple_phase_boundary(img)
+    assert tpb==1
+
+def test_tpb_3d_corners():
+    l = 2
+    img = np.zeros([l, l, l])
+    img[0] = 1
+    img[:,0] = 2
+    tpb = triple_phase_boundary(img)
+    assert tpb==1/3
+
 def test_multiphase_and_solver_agree():
     x = 100
     img = np.ones([x, x, x])
@@ -239,3 +281,5 @@ def test_mphsolver_on_strip_of_ones_and_twos_and_threes():
     S = tau.MultiPhaseSolver(img, cond)
     S.solve()
     assert np.around(S.tau,4)==1
+
+

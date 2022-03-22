@@ -137,10 +137,7 @@ class Solver:
         self.D_mean = self.D_0
         self.tau=self.VF/D_rel if D_rel != 0 else cp.inf
         self.D_eff=self.D_mean*D_rel
-        if verbose:
-            print('converged to:', self.tau,
-                  'after: ', self.iter, 'iterations in: ', np.around(timer() - start, 4),
-                  'seconds at a rate of', np.around((timer() - start)/self.iter, 4), 's/iter')
+        self.end_simulation(iter_limit, verbose, start)
         return self.tau
 
     def check_convergence(self, lt, lb, verbose, conv_crit, start, iter_limit):
@@ -217,6 +214,16 @@ class Solver:
         plt.imshow(flux[:, :, lay])
         return flux
 
+    def end_simulation(self, iter_limit, verbose, start):
+        if self.iter==iter_limit -1:
+            print('Warning: not converged')
+            converged = 'unconverged value of tau'
+        converged = 'converged to'
+        if verbose:
+            print(f'{converged}: self.tau \
+                  after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
+                  seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
+
 class PeriodicSolver(Solver):
     """
     Periodic Solver (works for non-periodic structures, but has higher RAM requirements)
@@ -280,10 +287,7 @@ class PeriodicSolver(Solver):
         self.D_mean=D_0
         self.tau = self.VF/D_rel if D_rel !=0 else cp.inf
         self.D_eff=D_0*D_rel
-        if verbose:
-            print('converged to:', self.tau,
-                  'after: ', self.iter, 'iterations in: ', np.around(timer() - start, 4),
-                  'seconds at a rate of', np.around((timer() - start)/self.iter, 4), 's/iter')
+        self.end_simulation(iter_limit, verbose, start)
         return self.tau
 
     def check_vertical_flux(self, conv_crit):
@@ -428,12 +432,8 @@ class MultiPhaseSolver(Solver):
         else:
             self.D_mean=0
         self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else cp.inf
-        if verbose:
-            print('converged to:', self.tau,
-                  'after: ', self.iter, 'iterations in: ', np.around(timer() - start, 4),
-                  'seconds at a rate of', np.around((timer() - start)/self.iter, 4), 's/iter')
+        self.end_simulation(iter_limit, verbose, start)
         return self.tau
-
     def check_convergence(self, verbose, conv_crit, start, iter_limit):
         # print progress
         if self.iter % 100 == 0:

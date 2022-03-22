@@ -1,4 +1,43 @@
 This documentation covers more advanced usage of TauFactor
+
+## Core solver
+
+### Tau and D_eff
+
+The main output of the solve function is `tau` and `D_eff`. `tau` is the tortuoisty factor, a measure of the reduction in diffusive transport caused by convolution in the geometry of the material. `D_eff` is the effective diffusivity resulting from the tortuous nature of the material. The relationship between these values is given by:
+
+$D_{eff}=D\frac{\epsilon}{\tau}$
+
+For more see [Cooper _et al._](https://doi.org/10.1016/j.softx.2016.09.002)
+
+```
+import taufactor as tau
+
+# load segmented image
+img = tifffile.imread('path/filename')
+s = tau.Solver(img)
+# tau
+s.tau
+# D_eff
+s.D_eff
+```
+
+### Steady-state maps
+
+Steady-state maps can be visualised after solving. These maps show the steady state solution to the flux field and concentration field after convergence.
+
+```
+import taufactor as tau
+
+# load segmented image
+img = tifffile.imread('path/filename')
+s = tau.Solver(img)
+# flux map
+s.flux_map(lay=5, filename='example.png')
+# concentration map
+s.conc_map()
+```
+
 ## Other Solvers
 
 ### Periodic solver
@@ -13,7 +52,7 @@ img = tifffile.imread('path/filename')
 # and convergence limit of 1%
 s = tau.PeriodicSolver(img, iter_limit=1000, conv_limit = 0.01)
 # call solve function
-tau = s.solve()
+s.solve()
 ```
 
 ### Multi-phase solver
@@ -30,19 +69,21 @@ cond = {1:0.32, 2:0.44}
 # create a multiphase solver object and set an iteration limit
 s = tau.MultiPhaseSolver(img, cond=cond, iter_limit=1000)
 # call solve function
-tau = s.solve()
+s.solve()
 ```
-
 
 ## Metrics
 
 Metrics can be calculated using the metrics module
+
 ```python
 from taufactor.metrics import *
 ```
 
 ### Volume fraction
+
 Volume fraction is calculated for each phase in a segmented image:
+
 ```python
 from taufactor.metrics import volume_fraction
 
@@ -56,7 +97,9 @@ vf = volume_fraction(img, phases={'pore':0, 'particle':1, 'binder':2})
 ```
 
 ### Surface area
+
 Volume fraction is calculated for each phase in a segmented image:
+
 ```python
 from taufactor.metrics import surface_area
 # calculate the volume fraction of a single phase in an img
