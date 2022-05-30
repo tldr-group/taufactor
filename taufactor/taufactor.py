@@ -3,7 +3,7 @@ import numpy as np
 import cupy as cp
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
-
+from taufactor.metrics import surface_area
 class Solver:
     """
     Default solver for two phase images. Once solve method is
@@ -35,7 +35,6 @@ class Solver:
 
         # init conc
         self.conc = self.init_conc(img)
-
         # create nn map
         self.nn = self.init_nn(img)
 
@@ -220,7 +219,7 @@ class Solver:
             converged = 'unconverged value of tau'
         converged = 'converged to'
         if verbose:
-            print(f'{converged}: self.tau \
+            print(f'{converged}: {self.tau} \
                   after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
                   seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
 
@@ -467,3 +466,233 @@ class MultiPhaseSolver(Solver):
         if abs(fl).min()==0:
             return 0, cp.array([0], dtype=self.precision)
         return err, fl.mean()
+
+
+class ElectrodeSolver():
+    """
+    Electrode Solver - solves the electrode tortuosity factor system (migration and capacitive current between current collector and solid/electrolyte interface)
+    Once solve method is called, tau, D_eff and D_rel are available as attributes.
+    """
+    
+    def __init__(self, img, precision=cp.single):
+
+        img = np.expand_dims(img, 0)
+        self.cpu_img = img
+        self.precision = precision
+        
+        # Define omega, res and c_DL
+        self.omega = 1e-6/img.shape[1]
+        self.res = 1
+        self.c_DL = 1
+        if len(img.shape)==4:
+            self.A_CC = img.shape[2]*img.shape[3]
+        else:
+            self.A_CC = img.shape[2]
+        self.k_0 = 1
+        
+        # VF calc
+        self.VF = np.mean(img)
+
+        # save original image in cuda
+        img = cp.array(img, dtype=self.precision)
+
+        # init phi
+        self.phi = self.init_phi(img)
+
+        self.phase_map = self.pad(img,[1,0])
+
+        # create prefactor map
+        self.prefactor = self.init_prefactor(img)
+
+        
+
+        #checkerboarding
+        self.w = 2 - cp.pi / (1.5 * img.shape[1])
+        # self.w = 0.01
+        self.cb = self.init_cb(img)
+
+        # solving params
+        self.converged = False
+        self.iter=0
+
+        # Results
+        self.tau_e=0
+        self.D_eff=None
+        self.D_mean=None
+    
+    def pad(self, img, vals=[0] * 6):
+        while len(vals) < 6:
+            vals.append(0)
+        if len(img.shape)==4:
+            to_pad = [1]*8
+            to_pad[:2] = (0, 0)
+        elif len(img.shape)==3:
+            to_pad = [1]*6
+            to_pad[:2] = (0, 0)
+
+        img = cp.pad(img, to_pad, 'constant')
+        img[:, 0], img[:, -1] = vals[:2]
+        img[:, :, 0], img[:, :, -1] = vals[2:4]
+
+        if len(img.shape)==4:
+            img[:, :, :, 0], img[:, :, :, -1] = vals[4:]
+        return img
+    
+    def crop(self, img, c = 1):
+        if len(img.shape)==4:
+            return img[:, c:-c, c:-c, c:-c]
+        elif len(img.shape)==3:
+            return img[:, c:-c, c:-c]
+    
+    def init_phi(self, img):
+        """
+        Initialise phi field as zeros
+
+        :param img: input image, with 1s conductive and 0s non-conductive
+        :type img: cp.array
+        :return: phi
+        :rtype: cp.array
+        """
+        phi = cp.zeros_like(img)+0j
+        phi = self.pad(phi, [1, 0])
+        return phi
+    
+    def init_cb(self, img):
+
+        if len(img.shape)==4:
+            bs, x, y, z = img.shape
+            cb = np.zeros([x, y, z])
+            a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
+            cb[(a + b + c) % 2 == 0] = 1*self.w
+            return [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
+
+        elif len(img.shape)==3:
+            bs, x, y = img.shape
+            cb = np.zeros([x, y])
+            a, b = np.meshgrid(range(x), range(y), indexing='ij')
+            cb[(a + b) % 2 == 0] = 1*self.w
+            return [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
+
+
+    def init_prefactor(self, img):
+        """
+        Initialise prefactors -> (nn_cond+2j*omega*res*c(dims-nn_cond))**-1
+
+        :param img: input image, with 1s conductive and 0s non-conductive
+        :type img: cp.array
+        :return: prefactor
+        :rtype: cp.array
+        """
+        dims = (len(img.shape)-1)*2
+        # find number of conducting nearest neighbours
+        img2 = self.pad(img, [1,0])
+        nn_cond = cp.zeros_like(img2, dtype=self.precision)
+        # iterate through shifts in the spatial dimensions
+        for dim in range(1, len(img.shape)):
+            for dr in [1, -1]:
+                nn_cond += cp.roll(img2, dr, dim)
+        # remove the paddings
+        nn_cond = self.crop(nn_cond, 1)
+        prefactor = (nn_cond+2j*self.omega*self.res*self.c_DL*(dims-nn_cond))**-1
+        return prefactor
+    
+    def sum_neighbours(self):
+        i=0
+        for dim in range(1, len(self.phi.shape)):
+            for dr in [1, -1]:
+                if i==0:
+                    out = cp.roll(self.phi, dr, dim)
+                else:
+                    out += cp.roll(self.phi, dr, dim)
+                i+=1
+
+        out = self.crop(out, 1)
+        return out
+    
+    def check_convergence(self, tau_e_list, verbose, conv_crit, iter_limit):
+        tau_e = tau_e_list[-1]
+        tau_e_list = np.array(tau_e_list)
+        loss = np.std(tau_e_list)/np.mean(tau_e_list)
+        
+        if self.iter % 100 == 0 and verbose:
+                print(f"Iteration: {self.iter}, Loss: {abs(loss)}")
+
+        if abs(loss) < conv_crit and abs(loss)>0:
+            return True, tau_e
+
+        if self.iter >= iter_limit:
+            print('Did not converge in the iteration limit')
+            return True, tau_e
+        
+        else:
+            return False, tau_e
+    
+    def tau_e_from_phi(self, out):
+        #  calculate total current on bottom boundary
+        n = self.crop(self.phase_map)[0,0].sum()
+        # print(out[:,0].sum())
+        current = (n-out[:,0].sum())*self.res
+        # z_total = phi_applied / total_current
+        z_total = 1/current
+        r_ion = z_total.real*3
+        tau_e = self.VF * r_ion * self.k_0 * self.A_CC / out.shape[1]
+
+        return tau_e
+
+
+
+    def solve(self, iter_limit=100000, verbose=True, conv_crit=0.025):
+        """
+        run a solve simulation
+
+        :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
+        if initialised as singles
+        :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
+        :param conv_crit: convergence criteria, 
+        :return: tau
+        """
+        dim = len(self.phi.shape)
+        start = timer()
+        tau_e_list = []
+        while not self.converged:
+            out = self.sum_neighbours()
+            out *= self.prefactor*self.crop(self.phase_map)
+            
+            if self.iter % 20 == 0:
+                tau_e = self.tau_e_from_phi(out)
+                tau_e_list.append(tau_e.item())
+                if len(tau_e_list)>20:
+                    tau_e_list.pop(0)
+                self.converged, self.tau_e = self.check_convergence(tau_e_list,verbose,conv_crit, iter_limit)
+            # if self.iter %10 == 0:
+            #     plt.imsave(f'temp/{self.iter}.png',out.imag[0].get())
+            # self.phi[:, 1:-1, 1:-1] = out
+            out -= self.crop(self.phi, 1)
+            out *= self.cb[self.iter%2]
+
+            # # phi = (1-w)phi + w*prefactor*sum_NN
+
+            if dim==4:
+                self.phi[:, 1:-1, 1:-1, 1:-1] += out
+            elif dim==3:
+                self.phi[:, 1:-1, 1:-1] += out
+
+            
+            self.iter += 1
+
+        self.end_simulation(iter_limit, verbose, start)
+    
+    def end_simulation(self, iter_limit, verbose, start):
+        if self.iter==iter_limit -1:
+            print('Warning: not converged')
+            converged = 'unconverged value of tau'
+        converged = 'converged to'
+        if verbose:
+            print(f'{converged}: {self.tau_e} \
+                  after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
+                  seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
+
+           
+
+
+
