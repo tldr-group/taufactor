@@ -1,9 +1,11 @@
 """Main module."""
+from math import tau
 import numpy as np
 import cupy as cp
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 from taufactor.metrics import surface_area
+
 class Solver:
     """
     Default solver for two phase images. Once solve method is
@@ -168,7 +170,6 @@ class Solver:
                 self.nn = cp.array(self.nn, dtype=cp.double)
                 self.precision = cp.double
             else:
-                print('Did not converge in the iteration limit')
                 return True, ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
 
         return False, False
@@ -214,10 +215,11 @@ class Solver:
         return flux
 
     def end_simulation(self, iter_limit, verbose, start):
-        if self.iter==iter_limit -1:
+        converged = 'converged to'
+        if self.iter >=iter_limit -1:
             print('Warning: not converged')
             converged = 'unconverged value of tau'
-        converged = 'converged to'
+        
         if verbose:
             print(f'{converged}: {self.tau} \
                   after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
@@ -454,7 +456,6 @@ class MultiPhaseSolver(Solver):
                 self.nn = cp.array(self.nn, dtype=cp.double)
                 self.precision = cp.double
             else:
-                print('Did not converge in the iteration limit')
                 return True, flux.get()
         return False, False
 
@@ -474,14 +475,14 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
     
-    def __init__(self, img, precision=cp.single):
+    def __init__(self, img, precision=cp.double, omega=1e-4, init=None):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = precision
         
         # Define omega, res and c_DL
-        self.omega = 1e-6/img.shape[1]
+        self.omega = omega
         self.res = 1
         self.c_DL = 1
         if len(img.shape)==4:
@@ -497,8 +498,10 @@ class ElectrodeSolver():
         img = cp.array(img, dtype=self.precision)
 
         # init phi
-        self.phi = self.init_phi(img)
-
+        if len(init) == 0:
+            self.phi = self.init_phi(img)
+        else:
+            self.phi = init
         self.phase_map = self.pad(img,[1,0])
 
         # create prefactor map
@@ -507,7 +510,8 @@ class ElectrodeSolver():
         
 
         #checkerboarding
-        self.w = 2 - cp.pi / (1.5 * img.shape[1])
+        # self.w = 2 - cp.pi / (1.5 * img.shape[1])
+        self.w = 1.5
         # self.w = 0.01
         self.cb = self.init_cb(img)
 
@@ -571,7 +575,9 @@ class ElectrodeSolver():
             cb = np.zeros([x, y])
             a, b = np.meshgrid(range(x), range(y), indexing='ij')
             cb[(a + b) % 2 == 0] = 1*self.w
-            return [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
+            cb = [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
+            cb[1][0] = cb[1][2]
+            return cb
 
 
     def init_prefactor(self, img):
@@ -593,7 +599,14 @@ class ElectrodeSolver():
                 nn_cond += cp.roll(img2, dr, dim)
         # remove the paddings
         nn_cond = self.crop(nn_cond, 1)
-        prefactor = (nn_cond+2j*self.omega*self.res*self.c_DL*(dims-nn_cond))**-1
+        self.nn = nn_cond
+        orc = self.omega*self.res*self.c_DL
+        nn_solid = dims - nn_cond
+        omegapf = (orc**2 + 1j*orc)/(orc**2+1)
+        prefactor = (nn_cond + 2*nn_solid*omegapf)**-1
+        # prefactor = (nn_cond+2j*self.omega*self.res*self.c_DL*(dims-nn_cond))**-1
+        prefactor[prefactor==cp.inf] = 0
+        prefactor[img==0] = 0
         return prefactor
     
     def sum_neighbours(self):
@@ -627,15 +640,13 @@ class ElectrodeSolver():
         else:
             return False, tau_e
     
-    def tau_e_from_phi(self, out):
+    def tau_e_from_phi(self):
         #  calculate total current on bottom boundary
-        n = self.crop(self.phase_map)[0,0].sum()
-        # print(out[:,0].sum())
-        current = (n-out[:,0].sum())*self.res
-        # z_total = phi_applied / total_current
-        z_total = 1/current
-        r_ion = z_total.real*3
-        tau_e = self.VF * r_ion * self.k_0 * self.A_CC / out.shape[1]
+        n = self.phase_map[0,1].sum()
+        z = self.res / (n-self.phi[0, 1].sum())
+        self.z = z
+        r_ion = z.real*3
+        tau_e = self.VF * r_ion * self.k_0 * self.A_CC / self.phi.shape[1]
 
         return tau_e
 
@@ -654,12 +665,16 @@ class ElectrodeSolver():
         dim = len(self.phi.shape)
         start = timer()
         tau_e_list = []
+        self.frames = []
         while not self.converged:
             out = self.sum_neighbours()
             out *= self.prefactor*self.crop(self.phase_map)
-            
+            out[self.prefactor==-1] = 0
             if self.iter % 20 == 0:
-                tau_e = self.tau_e_from_phi(out)
+                self.frames.append(self.phi.real.get()[0,...])
+                # self.frames.append(self.phi.imag.get()[0])
+
+                tau_e = self.tau_e_from_phi()
                 tau_e_list.append(tau_e.item())
                 if len(tau_e_list)>20:
                     tau_e_list.pop(0)
@@ -676,22 +691,27 @@ class ElectrodeSolver():
                 self.phi[:, 1:-1, 1:-1, 1:-1] += out
             elif dim==3:
                 self.phi[:, 1:-1, 1:-1] += out
-
             
             self.iter += 1
 
         self.end_simulation(iter_limit, verbose, start)
     
     def end_simulation(self, iter_limit, verbose, start):
+        # self.animate()
         if self.iter==iter_limit -1:
             print('Warning: not converged')
             converged = 'unconverged value of tau'
         converged = 'converged to'
         if verbose:
-            print(f'{converged}: {self.tau_e} \
-                  after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
-                  seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
+            print(f'{converged}: {self.tau_e} after: {self.iter} iterations in: {np.around(timer() - start, 4)} seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
 
+    def animate(self):
+        from moviepy.editor import ImageSequenceClip
+        print(self.frames[0].shape)
+        
+        self.frames = [np.dstack([f*255 for i in range(3)]) for f in self.frames]
+        clip = ImageSequenceClip(self.frames, fps=20)
+        clip.write_gif('test.gif', fps=20)
            
 
 
