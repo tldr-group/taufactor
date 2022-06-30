@@ -475,7 +475,7 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
     
-    def __init__(self, img, precision=cp.double, omega=1e-4, init=None):
+    def __init__(self, img, precision=cp.double, omega=1e-4, init=list()):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img
@@ -557,7 +557,7 @@ class ElectrodeSolver():
         :return: phi
         :rtype: cp.array
         """
-        phi = cp.zeros_like(img)+0j
+        phi = cp.zeros_like(img, dtype=self.precision)+0j
         phi = self.pad(phi, [1, 0])
         return phi
     
@@ -622,15 +622,22 @@ class ElectrodeSolver():
         out = self.crop(out, 1)
         return out
     
-    def check_convergence(self, tau_e_list, verbose, conv_crit, iter_limit):
-        tau_e = tau_e_list[-1]
-        tau_e_list = np.array(tau_e_list)
-        loss = np.std(tau_e_list)/np.mean(tau_e_list)
+    def check_convergence(self, tau_e, verbose, conv_crit, conv_crit_2, iter_limit, phi_list):
+        loss = (cp.vdot(phi_list[-1][0],phi_list[0][0]).imag/self.omega)**2
+        self.loss.append(loss)
+        loss = cp.array(self.loss[-10:]).mean()
+
+        self.tau_es.append(tau_e)
+        tau_e_loss = cp.array(self.tau_es[-10:]).std()
+
+        self.loss = self.loss[-10:]
+        self.tau_es = self.tau_es[-10:]
         
         if self.iter % 100 == 0 and verbose:
-                print(f"Iteration: {self.iter}, Loss: {abs(loss)}")
+            
+            print(f"Iteration: {self.iter}, Loss: {abs(loss):.3}, TauE: {tau_e}, Error: {tau_e_loss:.3}")
 
-        if abs(loss) < conv_crit and abs(loss)>0:
+        if abs(loss) < conv_crit and abs(loss)>0 and (tau_e_loss) < conv_crit_2:
             return True, tau_e
 
         if self.iter >= iter_limit:
@@ -652,52 +659,48 @@ class ElectrodeSolver():
 
 
 
-    def solve(self, iter_limit=100000, verbose=True, conv_crit=0.025):
+    def solve(self, iter_limit=100000, verbose=True, conv_crit=1e-8, conv_crit_2=1e-5):
         """
         run a solve simulation
 
         :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
         if initialised as singles
         :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
-        :param conv_crit: convergence criteria, 
+        :param conv_crit: convergence criteria - running mean of imaginary part of dot product between consecutive phi fields,
+        :param conv_crit_2: convergence criteria - running standard deviation of tau e
         :return: tau
         """
         dim = len(self.phi.shape)
         start = timer()
-        tau_e_list = []
+        phi_list = [self.phi]
         self.frames = []
+        self.loss = []
+        self.tau_es = []
+
         while not self.converged:
             out = self.sum_neighbours()
             out *= self.prefactor*self.crop(self.phase_map)
             out[self.prefactor==-1] = 0
-            if self.iter % 20 == 0:
-                self.frames.append(self.phi.real.get()[0,...])
-                # self.frames.append(self.phi.imag.get()[0])
-
+            if self.iter % 100 == 0:
                 tau_e = self.tau_e_from_phi()
-                tau_e_list.append(tau_e.item())
-                if len(tau_e_list)>20:
-                    tau_e_list.pop(0)
-                self.converged, self.tau_e = self.check_convergence(tau_e_list,verbose,conv_crit, iter_limit)
-            # if self.iter %10 == 0:
-            #     plt.imsave(f'temp/{self.iter}.png',out.imag[0].get())
-            # self.phi[:, 1:-1, 1:-1] = out
+                phi_list.append(self.phi.copy())
+                if len(phi_list)>2:
+                    phi_list.pop(0)
+
+                self.converged, self.tau_e = self.check_convergence(tau_e,verbose,conv_crit, conv_crit_2, iter_limit, phi_list)
             out -= self.crop(self.phi, 1)
             out *= self.cb[self.iter%2]
-
-            # # phi = (1-w)phi + w*prefactor*sum_NN
 
             if dim==4:
                 self.phi[:, 1:-1, 1:-1, 1:-1] += out
             elif dim==3:
                 self.phi[:, 1:-1, 1:-1] += out
-            
+
             self.iter += 1
 
         self.end_simulation(iter_limit, verbose, start)
     
     def end_simulation(self, iter_limit, verbose, start):
-        # self.animate()
         if self.iter==iter_limit -1:
             print('Warning: not converged')
             converged = 'unconverged value of tau'
@@ -705,14 +708,7 @@ class ElectrodeSolver():
         if verbose:
             print(f'{converged}: {self.tau_e} after: {self.iter} iterations in: {np.around(timer() - start, 4)} seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
 
-    def animate(self):
-        from moviepy.editor import ImageSequenceClip
-        print(self.frames[0].shape)
-        
-        self.frames = [np.dstack([f*255 for i in range(3)]) for f in self.frames]
-        clip = ImageSequenceClip(self.frames, fps=20)
-        clip.write_gif('test.gif', fps=20)
-           
+
 
 
 
