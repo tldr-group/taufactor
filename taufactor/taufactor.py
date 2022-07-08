@@ -511,7 +511,7 @@ class ElectrodeSolver():
 
         #checkerboarding
         # self.w = 2 - cp.pi / (1.5 * img.shape[1])
-        self.w = 1.5
+        self.w = 1.8
         # self.w = 0.01
         self.cb = self.init_cb(img)
 
@@ -622,30 +622,15 @@ class ElectrodeSolver():
         out = self.crop(out, 1)
         return out
     
-    def check_convergence(self, tau_e, verbose, conv_crit, conv_crit_2, iter_limit, phi_list):
-        loss = (cp.vdot(phi_list[-1][0],phi_list[0][0]).imag/self.omega)**2
-        self.loss.append(loss)
-        loss = cp.array(self.loss[-10:]).mean()
+    def check_convergence(self):
+        if len(self.tau_es)  < 100:
+            return False
+        loss = np.std(np.array(self.tau_es[-1000:]))
+        print(loss)
+        if loss < self.conv_crit:
+            return True
+        return False
 
-        self.tau_es.append(tau_e)
-        tau_e_loss = cp.array(self.tau_es[-10:]).std()
-
-        self.loss = self.loss[-10:]
-        self.tau_es = self.tau_es[-10:]
-        
-        if self.iter % 100 == 0 and verbose:
-            
-            print(f"Iteration: {self.iter}, Loss: {abs(loss):.3}, TauE: {tau_e}, Error: {tau_e_loss:.3}")
-
-        if abs(loss) < conv_crit and abs(loss)>0 and (tau_e_loss) < conv_crit_2:
-            return True, tau_e
-
-        if self.iter >= iter_limit:
-            print('Did not converge in the iteration limit')
-            return True, tau_e
-        
-        else:
-            return False, tau_e
     
     def tau_e_from_phi(self):
         #  calculate total current on bottom boundary
@@ -655,7 +640,7 @@ class ElectrodeSolver():
         r_ion = z.real*3
         tau_e = self.VF * r_ion * self.k_0 * self.A_CC / self.phi.shape[1]
 
-        return tau_e
+        return tau_e.get()
 
 
 
@@ -670,9 +655,9 @@ class ElectrodeSolver():
         :param conv_crit_2: convergence criteria - running standard deviation of tau e
         :return: tau
         """
+        self.conv_crit = conv_crit
         dim = len(self.phi.shape)
         start = timer()
-        phi_list = [self.phi]
         self.frames = []
         self.loss = []
         self.tau_es = []
@@ -681,13 +666,9 @@ class ElectrodeSolver():
             out = self.sum_neighbours()
             out *= self.prefactor*self.crop(self.phase_map)
             out[self.prefactor==-1] = 0
+            self.tau_es.append(self.tau_e_from_phi())
             if self.iter % 100 == 0:
-                tau_e = self.tau_e_from_phi()
-                phi_list.append(self.phi.copy())
-                if len(phi_list)>2:
-                    phi_list.pop(0)
-
-                self.converged, self.tau_e = self.check_convergence(tau_e,verbose,conv_crit, conv_crit_2, iter_limit, phi_list)
+                self.converged = self.check_convergence()
             out -= self.crop(self.phi, 1)
             out *= self.cb[self.iter%2]
 
@@ -697,7 +678,7 @@ class ElectrodeSolver():
                 self.phi[:, 1:-1, 1:-1] += out
 
             self.iter += 1
-
+        self.tau_e = self.tau_es[-1]
         self.end_simulation(iter_limit, verbose, start)
     
     def end_simulation(self, iter_limit, verbose, start):
