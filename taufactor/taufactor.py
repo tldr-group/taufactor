@@ -4,7 +4,6 @@ import numpy as np
 import cupy as cp
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
-from sklearn import semi_supervised
 from taufactor.metrics import surface_area
 
 class Solver:
