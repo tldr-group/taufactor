@@ -4,6 +4,7 @@ import numpy as np
 import cupy as cp
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
+from sklearn import semi_supervised
 from taufactor.metrics import surface_area
 
 class Solver:
@@ -475,7 +476,7 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
     
-    def __init__(self, img, precision=cp.double, omega=1e-4, init=list()):
+    def __init__(self, img, precision=cp.double, omega=1e-6):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img
@@ -496,12 +497,11 @@ class ElectrodeSolver():
 
         # save original image in cuda
         img = cp.array(img, dtype=self.precision)
-
+        self.img = img
         # init phi
-        if len(init) == 0:
-            self.phi = self.init_phi(img)
-        else:
-            self.phi = init
+        
+        self.phi = self.init_phi(img)
+        
         self.phase_map = self.pad(img,[1,0])
 
         # create prefactor map
@@ -510,13 +510,14 @@ class ElectrodeSolver():
         
 
         #checkerboarding
-        # self.w = 2 - cp.pi / (1.5 * img.shape[1])
-        self.w = 1.8
+        self.w = 2 - cp.pi / (1.5 * img.shape[1])
+        # self.w = 1.8
         # self.w = 0.01
         self.cb = self.init_cb(img)
 
         # solving params
         self.converged = False
+        self.semiconverged = False
         self.iter=0
 
         # Results
@@ -623,11 +624,33 @@ class ElectrodeSolver():
         return out
     
     def check_convergence(self):
-        if len(self.tau_es)  < 100:
+        
+        if len(self.tau_es)  < 1000:
             return False
-        loss = np.std(np.array(self.tau_es[-1000:]))
-        print(loss)
+        loss = np.std(np.array(self.tau_es[-100:]))
+        # print(len(self.tau_es),self.tau_es[-1], loss)
+        if self.verbose=='per_iter':
+            print(f'(iter {self.iter} loss {loss}, taue {self.tau_es[-1]}')
         if loss < self.conv_crit:
+            if self.semiconverged:
+                if self.tau_es[-1] > 1e-5:
+                    if abs(self.semiconverged - self.tau_es[-1]) < self.conv_crit_2:
+                        self.tau_e = self.tau_es[-1]
+                        self.end_simulation()
+                        return True
+                else:
+                    self.phi = self.init_phi(self.img)
+            self.semiconverged = self.tau_es[-1]
+            self.omega *= 0.1
+            print(f'Semi-converged to {self.semiconverged}. Reducing omega to {self.omega} to check convergence')
+            
+            self.iter = 0
+            self.prefactor = self.init_prefactor(self.img)
+            self.solve(iter_limit=self.iter_limit, verbose=self.verbose, conv_crit=self.conv_crit)
+            return True
+        if self.iter_limit == self.iter:
+            print('Iteration limit reached. Increase the iteration limit or try starting from a smaller omega')
+            
             return True
         return False
 
@@ -644,20 +667,24 @@ class ElectrodeSolver():
 
 
 
-    def solve(self, iter_limit=100000, verbose=True, conv_crit=1e-8, conv_crit_2=1e-5):
+    def solve(self, iter_limit=100000, verbose=True, conv_crit=1e-5, conv_crit_2=1e-3):
         """
         run a solve simulation
 
         :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
         if initialised as singles
         :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
-        :param conv_crit: convergence criteria - running mean of imaginary part of dot product between consecutive phi fields,
-        :param conv_crit_2: convergence criteria - running standard deviation of tau e
+        :param conv_crit: convergence criteria - running standard deviation of tau_e
+        :param conv_crit_2: convergence criteria - maximum difference between tau_e in consecutive omega solves
         :return: tau
         """
         self.conv_crit = conv_crit
+        self.conv_crit_2 = conv_crit_2
+        
+        self.iter_limit = iter_limit
+        self.verbose = verbose
         dim = len(self.phi.shape)
-        start = timer()
+        self.start = timer()
         self.frames = []
         self.loss = []
         self.tau_es = []
@@ -678,16 +705,16 @@ class ElectrodeSolver():
                 self.phi[:, 1:-1, 1:-1] += out
 
             self.iter += 1
-        self.tau_e = self.tau_es[-1]
-        self.end_simulation(iter_limit, verbose, start)
+        # self.tau_e = self.tau_es[-1]
+        # self.end_simulation(iter_limit, verbose, start)
     
-    def end_simulation(self, iter_limit, verbose, start):
-        if self.iter==iter_limit -1:
+    def end_simulation(self, ):
+        if self.iter==self.iter_limit -1:
             print('Warning: not converged')
             converged = 'unconverged value of tau'
         converged = 'converged to'
-        if verbose:
-            print(f'{converged}: {self.tau_e} after: {self.iter} iterations in: {np.around(timer() - start, 4)} seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
+        if self.verbose:
+            print(f'{converged}: {self.tau_e} after: {self.iter} iterations in: {np.around(timer() - self.start, 4)} seconds at a rate of {np.around((timer() - self.start)/self.iter, 4)} s/iter')
 
 
 
