@@ -108,3 +108,5 @@ ENV/
 /xy_352_rep_49.tif.npy
 /precision_tests.py
 /PeriodicVerticalMirror.tif
+
+temp
