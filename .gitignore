@@ -110,3 +110,4 @@ ENV/
 /PeriodicVerticalMirror.tif
 
 temp
+.pypirc
