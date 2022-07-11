@@ -282,4 +282,24 @@ def test_mphsolver_on_strip_of_ones_and_twos_and_threes():
     S.solve()
     assert np.around(S.tau,4)==1
 
+def test_taue_deadend():
+    """Run solver on a strip of ones, 1/4 volume of total"""
+    
+    l = 100
+    img = np.zeros((l,l))
+    img[:75,45:55] = 1
+    img[img!=1] = 0
+    esolver = tau.ElectrodeSolver(img)
+    esolver.solve()
+    assert np.around(esolver.tau_e,3)==0.601
 
+def test_taue_throughpore():
+    """Run solver on a strip of ones, 1/4 volume of total"""
+    
+    l = 100
+    img = np.zeros((l,l))
+    img[:,45:55] = 1
+    img[img!=1] = 0
+    esolver = tau.ElectrodeSolver(img)
+    esolver.solve()
+    assert np.around(esolver.tau_e,3)==1.046
