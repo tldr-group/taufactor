@@ -2,9 +2,10 @@
 History
 =======
 ------------------
-0.1.4 (2022-03-22)
+0.1.4 (2022-07-11)
 ------------------
 
+* Add TauE solver
 * Add triple phase boundary calculations
 * Fix cuboids not converging
 * Fix convergence messaging
