@@ -49,6 +49,7 @@ class Solver:
         self.L_A = x / (z * y)
         self.converged = False
         self.semi_converged = False
+        self.old_fl = -1
         self.iter=0
         img = None
 
@@ -128,38 +129,39 @@ class Solver:
                   self.conc[:, 1:-1, 1:-1, :-2]
             out /= self.nn
             if self.iter % 20 == 0:
-                lt = abs(cp.sum(out[:, 0]) - self.ph_top)
-                lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
-                self.converged, D_rel = self.check_convergence(lt, lb, verbose, conv_crit, start, iter_limit)
+                self.converged = self.check_convergence(verbose, conv_crit, start, iter_limit)
             out -= self.crop(self.conc, 1)
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
             self.iter += 1
         self.D_mean = self.D_0
-        self.tau=self.VF/D_rel if D_rel != 0 else cp.inf
-        self.D_eff=self.D_mean*D_rel
+        self.D_eff=self.D_mean*self.D_rel
         self.end_simulation(iter_limit, verbose, start)
         return self.tau
 
-    def check_convergence(self, lt, lb, verbose, conv_crit, start, iter_limit):
-        loss = lt - lb
+    def check_convergence(self, verbose, conv_crit, start, iter_limit):
         # print progress
         if self.iter % 100 == 0:
-            if verbose == 'per_iter':
-                print(self.iter, abs(loss))
+            self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
+            self.D_rel = ((self.new_fl) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+            self.tau=self.VF/self.D_rel if self.D_rel != 0 else cp.inf
+            if self.semi_converged == 'zero_flux':
+                return True
 
-        # check for convergence if loss is good
-        if abs(loss) < conv_crit * 0.01:
+            if verbose == 'per_iter':
+                print(self.iter, abs(err), self.tau)
+
             if self.semi_converged:
-                cvf = self.check_vertical_flux(conv_crit)
-                if cvf:
-                    if cvf == 'zero_flux':
-                        return True, 0
-                    return True, ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+                self.converged = self.check_rolling_mean(conv_crit=1e-3)
+
+                if not self.converged:
+                    self.old_fl = self.new_fl
+                    return False
+                else:
+                    return True
             else:
-                self.semi_converged = True
-        else:
-            self.semi_converged = False
+                self.old_fl = self.new_fl
+                return False
 
         # increase precision to double if currently single
         if self.iter >= iter_limit:
@@ -170,9 +172,9 @@ class Solver:
                 self.nn = cp.array(self.nn, dtype=cp.double)
                 self.precision = cp.double
             else:
-                return True, ((lt + lb) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
+                return True
 
-        return False, False
+        return False
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]
@@ -181,10 +183,17 @@ class Solver:
         fl = cp.sum(vert_flux, (0, 2, 3))[1:-1]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if err < conv_crit or np.isnan(err).item():
-            return True
+            return True, cp.mean(fl), err
         if fl.min() == 0:
-            return 'zero_flux'
-        return False
+            return 'zero_flux', cp.mean(fl), err
+        return False, cp.mean(fl), err
+    
+    def check_rolling_mean(self, conv_crit):
+        err = (self.new_fl - self.old_fl) / (self.new_fl + self.old_fl)
+        if err < conv_crit:
+            return True
+        else:
+            return False
 
     def conc_map(self, lay=0):
         """
@@ -277,17 +286,14 @@ class PeriodicSolver(Solver):
             out = out[:, 2:-2]
             out /= self.nn
             if self.iter % 50 == 0:
-                lt = abs(cp.sum(out[:, 0]) - self.ph_top)
-                lb = abs(cp.sum(out[:, -1]) - self.ph_bot)
-                self.converged, D_rel = self.check_convergence(lt, lb, verbose, conv_crit, start, iter_limit)
+                self.converged = self.check_convergence(verbose, conv_crit, start, iter_limit)
             out -= self.conc[:, 2:-2]
             out *= self.cb[self.iter % 2]
             self.conc[:, 2:-2] += out
             self.iter += 1
 
         self.D_mean=D_0
-        self.tau = self.VF/D_rel if D_rel !=0 else cp.inf
-        self.D_eff=D_0*D_rel
+        self.D_eff=D_0*self.D_rel
         self.end_simulation(iter_limit, verbose, start)
         return self.tau
 
@@ -297,10 +303,11 @@ class PeriodicSolver(Solver):
         vert_flux[cp.roll(self.conc, 1, 1) == 0] = 0
         fl = cp.sum(vert_flux, (0, 2, 3))[3:-2]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or np.isnan(err):
-            return True
+        if err < conv_crit or np.isnan(err).item():
+            return True, cp.mean(fl), err
         if fl.min() == 0:
-            return 'zero_flux'
+            return 'zero_flux', cp.mean(fl), err
+        return False, cp.mean(fl), err
 
     def flux_map(self, lay=0):
         """
@@ -353,8 +360,13 @@ class MultiPhaseSolver(Solver):
         super().__init__(img, precision, bc)
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
+        self.semi_converged = False
+        self.old_fl = -1
         self.VF = {p:np.mean(img==p) for p in np.unique(img)}
-
+        if len(np.array([self.VF[z] for z in self.VF.keys() if z!=0]))>0:
+            self.D_mean=np.sum(np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z!=0]))
+        else:
+            self.D_mean=0
     def init_nn(self, img):
         #conductivity map
         img2 = cp.zeros_like(img)
@@ -423,29 +435,39 @@ class MultiPhaseSolver(Solver):
                   self.conc[:, 1:-1, 1:-1, :-2] * self.pre_factors[5][:, 1:-1, 1:-1, :-2]
             out /= self.nn
             if self.iter % 20 == 0:
-                self.converged, self.D_eff = self.check_convergence(verbose, conv_crit, start, iter_limit)
+                self.converged = self.check_convergence(verbose, conv_crit, start, iter_limit)
             out -= self.crop(self.conc, 1)
             out *= self.cb[self.iter%2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
 
-        if len(np.array([self.VF[z] for z in self.VF.keys() if z!=0]))>0:
-            self.D_mean=np.sum(np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z!=0]))
-        else:
-            self.D_mean=0
-        self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else cp.inf
+
         self.end_simulation(iter_limit, verbose, start)
         return self.tau
+
     def check_convergence(self, verbose, conv_crit, start, iter_limit):
         # print progress
         if self.iter % 100 == 0:
-            loss, flux = self.check_vertical_flux(conv_crit)
-            if verbose=='per_iter':
-                print(loss)
-            if abs(loss) < conv_crit or np.isnan(loss).item():
-                self.converged = True
-                b, x, y, z = self.cpu_img.shape
-                flux *= (x+1)/(y*z)
-                return True, flux.get()
+            self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
+            b, x, y, z = self.cpu_img.shape
+            self.D_eff = self.new_fl*(x+1)/(y*z)
+            self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else cp.inf
+            if self.semi_converged == 'zero_flux':
+                return True
+
+            if verbose == 'per_iter':
+                print(self.iter, abs(err), self.tau)
+
+            if self.semi_converged:
+                self.converged = self.check_rolling_mean(conv_crit=1e-3)
+
+                if not self.converged:
+                    self.old_fl = self.new_fl
+                    return False
+                else:
+                    return True
+            else:
+                self.old_fl = self.new_fl
+                return False
 
         # increase precision to double if currently single
         if self.iter >= iter_limit:
@@ -456,18 +478,20 @@ class MultiPhaseSolver(Solver):
                 self.nn = cp.array(self.nn, dtype=cp.double)
                 self.precision = cp.double
             else:
-                return True, flux.get()
-        return False, False
+                return True
+
+        return False
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = (self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]) * self.pre_factors[1][:, :-2, 1:-1, 1:-1]
         vert_flux[self.nn == cp.inf] = 0
         fl = cp.sum(vert_flux, (0, 2, 3))
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if abs(fl).min()==0:
-            return 0, cp.array([0], dtype=self.precision)
-        return err, fl.mean()
-
+        if err < conv_crit or np.isnan(err).item():
+            return True, cp.mean(fl), err
+        if fl.min() == 0:
+            return 'zero_flux', cp.mean(fl), err
+        return False, cp.mean(fl), err
 
 class ElectrodeSolver():
     """
@@ -517,6 +541,7 @@ class ElectrodeSolver():
         # solving params
         self.converged = False
         self.semiconverged = False
+        self.old_fl = -1
         self.iter=0
 
         # Results
