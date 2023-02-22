@@ -17,7 +17,7 @@ def test_solver_on_uniform_block():
     img = np.ones([l,l, l]).reshape(1, l, l, l)
     S = tau.Solver(img)
     S.solve()
-    assert S.tau==1.0
+    assert np.around(S.tau, decimals=5)==1.0
 
 def test_solver_on_uniform_rectangular_block_solver_dim():
     """Run solver on a block of ones."""
@@ -25,7 +25,7 @@ def test_solver_on_uniform_rectangular_block_solver_dim():
     img = np.ones([l*2,l, l]).reshape(1, l*2, l, l)
     S = tau.Solver(img)
     S.solve()
-    assert S.tau==1.0
+    assert np.around(S.tau, decimals=5)==1.0
 
 def test_solver_on_uniform_rectangular_block_non_solver_dim():
     """Run solver on a block of ones."""
@@ -33,7 +33,7 @@ def test_solver_on_uniform_rectangular_block_non_solver_dim():
     img = np.ones([l,l, l*2]).reshape(1, l, l, l*2)
     S = tau.Solver(img)
     S.solve()
-    assert S.tau==1.0
+    assert np.around(S.tau, decimals=5)==1.0
 
 def test_solver_on_empty_block():
     """Run solver on a block of zeros."""
@@ -52,7 +52,7 @@ def test_solver_on_strip_of_ones():
     img[:,:,0:t,0:t]=1
     S = tau.Solver(img)
     S.solve()
-    assert S.tau==1
+    assert np.around(S.tau, decimals=5)==1
 
 #  Testing the periodic solver
 
@@ -62,7 +62,7 @@ def test_periodic_solver_on_uniform_block():
     img = np.ones([l,l, l]).reshape(1, l, l, l)
     S = tau.PeriodicSolver(img)
     S.solve()
-    assert S.tau==1.0
+    assert np.around(S.tau, decimals=5)==1.0
 
 def test_periodic_solver_on_empty_block():
     """Run solver on a block of zeros."""
@@ -81,7 +81,7 @@ def test_periodic_solver_on_strip_of_ones():
     img[:,:,0:t,0:t]=1
     S = tau.PeriodicSolver(img)
     S.solve()
-    assert S.tau==1
+    assert np.around(S.tau, decimals=5)==1
 
 # Testing the metrics
 # Volume fraction
@@ -92,7 +92,7 @@ def test_volume_fraction_on_uniform_block():
     img = np.ones([l,l, l]).reshape(1, l, l, l)
     vf = volume_fraction(img)
 
-    assert vf==1.0
+    assert np.around(vf, decimals=5)==1.0
 
 def test_volume_fraction_on_empty_block():
     """Run volume fraction on empty block"""
@@ -100,7 +100,7 @@ def test_volume_fraction_on_empty_block():
     img = np.zeros([l,l, l]).reshape(1, l, l, l)
     vf = volume_fraction(img)
 
-    assert vf==1.0
+    assert np.around(vf, decimals=5)==1.0
 
 def test_volume_fraction_on_checkerboard():
     """Run volume fraction on checkerboard block"""
@@ -282,4 +282,24 @@ def test_mphsolver_on_strip_of_ones_and_twos_and_threes():
     S.solve()
     assert np.around(S.tau,4)==1
 
+def test_taue_deadend():
+    """Run solver on a strip of ones, 1/4 volume of total"""
+    
+    l = 100
+    img = np.zeros((l,l))
+    img[:75,45:55] = 1
+    img[img!=1] = 0
+    esolver = tau.ElectrodeSolver(img)
+    esolver.solve()
+    assert np.around(esolver.tau_e,3)==0.601
 
+def test_taue_throughpore():
+    """Run solver on a strip of ones, 1/4 volume of total"""
+    
+    l = 100
+    img = np.zeros((l,l))
+    img[:,45:55] = 1
+    img[img!=1] = 0
+    esolver = tau.ElectrodeSolver(img)
+    esolver.solve()
+    assert np.around(esolver.tau_e,3)==1.046

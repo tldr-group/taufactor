@@ -24,7 +24,7 @@ you through the process.
 
 
 Development
-########
+###########
 
 These instructions are for running TauFactor in a development environment (i.e. not using the PyPI package)
 

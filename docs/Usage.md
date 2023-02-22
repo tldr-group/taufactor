@@ -72,6 +72,22 @@ s = tau.MultiPhaseSolver(img, cond=cond, iter_limit=1000)
 s.solve()
 ```
 
+### Electrode tortuosity factor solver
+
+This solver implements the electrode tortuosity method from [Nguyen _et al._](https://doi.org/10.1038/s41524-020-00386-4)
+
+```
+import taufactor as tau
+
+# load n phase segmented image
+img = tifffile.imread('path/filename')
+
+# create an electrode solver object and set an iteration limit
+s = tau.ElectrodeSolver(img)
+# call solve function
+s.solve()
+```
+
 ## Metrics
 
 Metrics can be calculated using the metrics module
