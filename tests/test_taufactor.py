@@ -5,6 +5,7 @@
 import pytest
 import taufactor as tau
 from taufactor.metrics import volume_fraction, surface_area, triple_phase_boundary
+import torch as pt
 from tests.utils import *
 import numpy as np
 import matplotlib.pyplot as plt
@@ -41,7 +42,7 @@ def test_solver_on_empty_block():
     img = np.zeros([l,l, l]).reshape(1, l, l, l)
     S = tau.Solver(img)
     S.solve(verbose='per_iter', iter_limit=1000)
-    assert S.tau==cp.inf
+    assert S.tau==pt.inf
 
 
 def test_solver_on_strip_of_ones():
@@ -70,7 +71,7 @@ def test_periodic_solver_on_empty_block():
     img = np.zeros([l,l, l]).reshape(1, l, l, l)
     S = tau.PeriodicSolver(img)
     S.solve(verbose='per_iter', iter_limit=1000)
-    assert S.tau == cp.inf
+    assert S.tau == pt.inf
 
 
 def test_periodic_solver_on_strip_of_ones():
@@ -227,7 +228,7 @@ def test_mphsolver_on_empty_block():
     img = np.zeros([l,l, l]).reshape(1, l, l, l)
     S = tau.MultiPhaseSolver(img)
     S.solve(iter_limit=1000)
-    assert S.tau==cp.inf
+    assert S.tau==pt.inf
 
 def test_mphsolver_on_ones_block():
     """Run solver on a block of ones."""
