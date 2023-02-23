@@ -26,7 +26,7 @@ jobs:
               run: |
                   $CONDA/bin/conda env update --file environment.yml --name base
             - name: Install taufactor
-            - run: |
+              run: |
                   $CONDA/bin/pip install -e .
             - name: Lint with flake8
               run: |
