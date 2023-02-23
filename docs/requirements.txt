@@ -3,3 +3,4 @@ torch
 scipy
 matplotlib
 tifffile
+myst_parser
