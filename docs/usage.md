@@ -1,4 +1,6 @@
-This documentation covers more advanced usage of TauFactor
+# Using Taufactor
+
+This documentation covers the full usage of TauFactor
 
 ## Core solver
 

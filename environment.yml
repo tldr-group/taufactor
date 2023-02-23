@@ -1,0 +1,8 @@
+name: taufactor
+channels:
+    - pytorch
+    - nvidia
+dependencies:
+    - python=3.8
+    - pytorch
+    - pytorch-cuda=11.6
