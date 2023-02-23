@@ -20,13 +20,11 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
             alt="MIT LICENSE"></a>
 </p>
 
-# Requirements
+## Requirements
 
-**You will need an NVIDIA GPU to use this distribution of taufactor.** <br />
-Before installing taufactor, download the most recent version of CuPy:
-https://docs.cupy.dev/en/stable/install.html
+Before installing taufactor, [download the most recent version of PyTorch](https://pytorch.org/get-started/locally/).
 
-# Quickstart
+## Quickstart
 
 A basic example for taufactor:
 
@@ -51,7 +49,7 @@ s.conc_map()
 
 ```
 
-# Tests
+## Tests
 
 To run unit tests navigate to the root directory and run
 
@@ -59,7 +57,7 @@ To run unit tests navigate to the root directory and run
 pytest
 ```
 
-# Credits
+## Credits
 
 This package was created by the tldr group at the Dyson School of Design Engineering, Imperial College London.
 This package was created with Cookiecutter* and the `audreyr/cookiecutter-pypackage`* project template.
