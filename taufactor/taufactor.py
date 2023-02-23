@@ -1,17 +1,19 @@
 """Main module."""
 from math import tau
 import numpy as np
-import cupy as cp
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 from taufactor.metrics import surface_area
-
+import torch as pt
+import cupy as cp
+import tifffile
+import taufactor
 class Solver:
     """
     Default solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5), D_0=1):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -27,13 +29,13 @@ class Solver:
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
-        self.precision = precision
+        self.precision = pt.float
         # VF calc
         self.VF = np.mean(img)
         # save original image in cuda
-        img = cp.array(img, dtype=self.precision)
-        self.ph_bot = cp.sum(img[:, -1]) * self.bot_bc
-        self.ph_top = cp.sum(img[:, 0]) * self.top_bc
+        img = pt.tensor(img, dtype=self.precision)
+        self.ph_bot = pt.sum(img[:, -1]).cuda() * self.bot_bc
+        self.ph_top = pt.sum(img[:, 0]).cuda() * self.top_bc
 
         # init conc
         self.conc = self.init_conc(img)
@@ -41,7 +43,7 @@ class Solver:
         self.nn = self.init_nn(img)
 
         #checkerboarding
-        self.w = 2 - cp.pi / (1.5 * img.shape[1])
+        self.w = 2 - pt.pi / (1.5 * img.shape[1])
         self.cb = self.init_cb(img)
 
         # solving params
@@ -61,30 +63,26 @@ class Solver:
     def init_conc(self, img):
         bs, x, y, z = img.shape
         sh = 1 / (x * 2)
-        vec = cp.linspace(self.top_bc + sh, self.bot_bc - sh, x)
+        vec = pt.linspace(self.top_bc + sh, self.bot_bc - sh, x, dtype=self.precision)
         for i in range(2):
-            vec = cp.expand_dims(vec, -1)
-        vec = cp.expand_dims(vec, 0)
-        vec = vec.repeat(z, -1)
-        vec = vec.repeat(y, -2)
-        vec = vec.repeat(bs, 0)
-        vec = vec.astype(self.precision)
-
-        return self.pad(img * vec, [self.top_bc * 2, self.bot_bc * 2])
+            vec = pt.unsqueeze(vec, -1)
+        vec = pt.unsqueeze(vec, 0)
+        vec = vec.repeat(bs, 1,y, z, )
+        return self.pad(img * vec, [self.top_bc * 2, self.bot_bc * 2]).cuda()
 
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))
-        nn = cp.zeros_like(img2, dtype=self.precision)
+        nn = pt.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, 4):
             for dr in [1, -1]:
-                nn += cp.roll(img2, dr, dim)
+                nn += pt.roll(img2, dr, dim)
         # remove the two paddings
         nn = self.crop(nn, 2)
         # avoid div 0 errors
-        nn[img == 0] = cp.inf
-        nn[nn == 0] = cp.inf
-        return nn
+        nn[img == 0] = pt.inf
+        nn[nn == 0] = pt.inf
+        return nn.cuda()
 
     def init_cb(self, img):
         bs, x, y, z = img.shape
@@ -92,14 +90,14 @@ class Solver:
         a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
         cb[(a + b + c) % 2 == 0] = 1
         cb *= self.w
-        return [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
+        return [pt.roll(pt.tensor(cb, dtype=self.precision).cuda(), sh, 0) for sh in [0, 1]]
 
     def pad(self, img, vals=[0] * 6):
         while len(vals) < 6:
             vals.append(0)
         to_pad = [1]*8
-        to_pad[:2] = (0, 0)
-        img = cp.pad(img, to_pad, 'constant')
+        to_pad[-2:] = (0, 0)
+        img = pt.nn.functional.pad(img, to_pad, 'constant')
         img[:, 0], img[:, -1] = vals[:2]
         img[:, :, 0], img[:, :, -1] = vals[2:4]
         img[:, :, :, 0], img[:, :, :, -1] = vals[4:]
@@ -119,32 +117,35 @@ class Solver:
         max and min flux through a given layer
         :return: tau
         """
-        start = timer()
-        while not self.converged:
-            out = self.conc[:, 2:, 1:-1, 1:-1] + \
-                  self.conc[:, :-2, 1:-1, 1:-1] + \
-                  self.conc[:, 1:-1, 2:, 1:-1] + \
-                  self.conc[:, 1:-1, :-2, 1:-1] + \
-                  self.conc[:, 1:-1, 1:-1, 2:] + \
-                  self.conc[:, 1:-1, 1:-1, :-2]
-            out /= self.nn
-            if self.iter % 20 == 0:
-                self.converged = self.check_convergence(verbose, conv_crit, start, iter_limit)
-            out -= self.crop(self.conc, 1)
-            out *= self.cb[self.iter%2]
-            self.conc[:, 1:-1, 1:-1, 1:-1] += out
-            self.iter += 1
-        self.D_mean = self.D_0
-        self.D_eff=self.D_mean*self.D_rel
-        self.end_simulation(iter_limit, verbose, start)
-        return self.tau
+        
+        with pt.no_grad():
+            start = timer()
+            while not self.converged:
+                out = self.conc[:, 2:, 1:-1, 1:-1] + \
+                    self.conc[:, :-2, 1:-1, 1:-1] + \
+                    self.conc[:, 1:-1, 2:, 1:-1] + \
+                    self.conc[:, 1:-1, :-2, 1:-1] + \
+                    self.conc[:, 1:-1, 1:-1, 2:] + \
+                    self.conc[:, 1:-1, 1:-1, :-2]
+                    
+                out /= self.nn
+                if self.iter % 20 == 0:
+                    self.converged = self.check_convergence(verbose, conv_crit, start, iter_limit)
+                out -= self.crop(self.conc, 1)
+                out *= self.cb[self.iter%2]
+                self.conc[:, 1:-1, 1:-1, 1:-1] += out
+                self.iter += 1
+            self.D_mean = self.D_0
+            self.D_eff=self.D_mean*self.D_rel
+            self.end_simulation(iter_limit, verbose, start)
+            return self.tau
 
     def check_convergence(self, verbose, conv_crit, start, iter_limit):
         # print progress
         if self.iter % 100 == 0:
             self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
-            self.D_rel = ((self.new_fl) * self.L_A / abs(self.top_bc - self.bot_bc)).get()
-            self.tau=self.VF/self.D_rel if self.D_rel != 0 else cp.inf
+            self.D_rel = ((self.new_fl) * self.L_A / abs(self.top_bc - self.bot_bc)).cpu()
+            self.tau=self.VF/self.D_rel if self.D_rel != 0 else pt.inf
             if self.semi_converged == 'zero_flux':
                 return True
 
@@ -165,13 +166,13 @@ class Solver:
 
         # increase precision to double if currently single
         if self.iter >= iter_limit:
-            if self.precision == cp.single:
-                print('increasing precision to double')
-                self.iter = 0
-                self.conc = cp.array(self.conc, dtype=cp.double)
-                self.nn = cp.array(self.nn, dtype=cp.double)
-                self.precision = cp.double
-            else:
+            # if self.precision == cp.single:
+            #     print('increasing precision to double')
+            #     self.iter = 0
+            #     self.conc = cp.array(self.conc, dtype=cp.double)
+            #     self.nn = cp.array(self.nn, dtype=cp.double)
+            #     self.precision = cp.double
+            # else:
                 return True
 
         return False
@@ -180,13 +181,13 @@ class Solver:
         vert_flux = self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]
         vert_flux[self.conc[:, :-2, 1:-1, 1:-1] == 0] = 0
         vert_flux[self.conc[:, 1:-1, 1:-1, 1:-1] == 0] = 0
-        fl = cp.sum(vert_flux, (0, 2, 3))[1:-1]
+        fl = pt.sum(vert_flux, (0, 2, 3))[1:-1]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or np.isnan(err).item():
-            return True, cp.mean(fl), err
+        if err < conv_crit or pt.isnan(err).item():
+            return True, pt.mean(fl), err
         if fl.min() == 0:
-            return 'zero_flux', cp.mean(fl), err
-        return False, cp.mean(fl), err
+            return 'zero_flux', pt.mean(fl), err
+        return False, pt.mean(fl), err
     
     def check_rolling_mean(self, conv_crit):
         err = (self.new_fl - self.old_fl) / (self.new_fl + self.old_fl)
@@ -201,7 +202,7 @@ class Solver:
         :param lay: depth to plot
         :return: 3D conc map
         """
-        img = self.conc[0, 1:-1, 1:-1, 1:-1].get()
+        img = self.conc[0, 1:-1, 1:-1, 1:-1].cpu()
         img[self.cpu_img[0, :, :, :] == 0] = -1
         plt.imshow(img[:, :, lay])
         plt.show()
@@ -213,12 +214,12 @@ class Solver:
         :param lay: depth to plot
         :return: 3D flux map
         """
-        flux = cp.zeros_like(self.conc)
-        ph_map = self.pad(cp.array(self.cpu_img))
+        flux = pt.zeros_like(self.conc)
+        ph_map = self.pad(pt.tensor(self.cpu_img))
         for dim in range(1, 4):
             for dr in [1, -1]:
-                flux += abs(cp.roll(self.conc, dr, dim) - self.conc) * cp.roll(ph_map, dr, dim)
-        flux = flux[0, 2:-2, 1:-1, 1:-1].get()
+                flux += abs(pt.roll(self.conc, dr, dim) - self.conc) * pt.roll(ph_map, dr, dim)
+        flux = flux[0, 2:-2, 1:-1, 1:-1].cpu()
         flux[self.cpu_img[0, 1:-1] == 0] = 0
         plt.imshow(flux[:, :, lay])
         return flux
@@ -239,7 +240,7 @@ class PeriodicSolver(Solver):
     Periodic Solver (works for non-periodic structures, but has higher RAM requirements)
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, precision=cp.single, bc=(-0.5, 0.5), D_0=1):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -250,21 +251,21 @@ class PeriodicSolver(Solver):
         :param D_0: reference material diffusivity
 
         """
-        super().__init__(img, precision, bc, D_0)
-        self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2]
+        super().__init__(img, bc, D_0)
+        self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2].cuda()
 
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))[:, :, 2:-2, 2:-2]
-        nn = cp.zeros_like(img2, dtype=self.precision)
+        nn = pt.zeros_like(img2)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, 4):
             for dr in [1, -1]:
-                nn += cp.roll(img2, dr, dim)
+                nn += pt.roll(img2, dr, dim)
         # avoid div 0 errors
         nn = nn[:, 2:-2]
-        nn[img == 0] = cp.inf
-        nn[nn == 0] = cp.inf
-        return nn
+        nn[img == 0] = pt.inf
+        nn[nn == 0] = pt.inf
+        return nn.cuda()
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, D_0=1):
         """
@@ -279,10 +280,10 @@ class PeriodicSolver(Solver):
         """
         start = timer()
         while not self.converged:
-            out = cp.zeros_like(self.conc)
+            out = pt.zeros_like(self.conc)
             for dim in range(1, 4):
                 for dr in [1, -1]:
-                    out += cp.roll(self.conc, dr, dim)
+                    out += pt.roll(self.conc, dr, dim)
             out = out[:, 2:-2]
             out /= self.nn
             if self.iter % 50 == 0:
@@ -298,16 +299,16 @@ class PeriodicSolver(Solver):
         return self.tau
 
     def check_vertical_flux(self, conv_crit):
-        vert_flux = abs(self.conc - cp.roll(self.conc, 1, 1))
+        vert_flux = abs(self.conc - pt.roll(self.conc, 1, 1))
         vert_flux[self.conc == 0] = 0
-        vert_flux[cp.roll(self.conc, 1, 1) == 0] = 0
-        fl = cp.sum(vert_flux, (0, 2, 3))[3:-2]
+        vert_flux[pt.roll(self.conc, 1, 1) == 0] = 0
+        fl = pt.sum(vert_flux, (0, 2, 3))[3:-2]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or np.isnan(err).item():
-            return True, cp.mean(fl), err
+        if err < conv_crit or pt.isnan(err).item():
+            return True, pt.mean(fl), err
         if fl.min() == 0:
-            return 'zero_flux', cp.mean(fl), err
-        return False, cp.mean(fl), err
+            return 'zero_flux', pt.mean(fl), err
+        return False, pt.mean(fl), err
 
     def flux_map(self, lay=0):
         """
@@ -315,12 +316,12 @@ class PeriodicSolver(Solver):
         :param lay: depth to plot
         :return: 3D flux map
         """
-        flux = cp.zeros_like(self.conc)
-        ph_map = self.pad(self.pad(cp.array(self.cpu_img)))[:, :, 2:-2, 2:-2]
+        flux = pt.zeros_like(self.conc)
+        ph_map = self.pad(self.pad(pt.tensor(self.cpu_img)))[:, :, 2:-2, 2:-2]
         for dim in range(1, 4):
             for dr in [1, -1]:
-                flux += abs(cp.roll(self.conc, dr, dim) - self.conc) * cp.roll(ph_map, dr, dim)
-        flux = flux[0, 2:-2].get()
+                flux += abs(pt.roll(self.conc, dr, dim) - self.conc) * pt.roll(ph_map, dr, dim)
+        flux = flux[0, 2:-2].cpu()
         flux[self.cpu_img[0] == 0] = 0
         plt.imshow(flux[:, :, lay])
         return flux
@@ -331,7 +332,7 @@ class PeriodicSolver(Solver):
         :param lay: depth to plot
         :return: 3D conc map
         """
-        img = self.conc[0, 2:-2].get()
+        img = self.conc[0, 2:-2].cpu()
         img[self.cpu_img[0] == 0] = -1
         plt.imshow(img[:, :, lay])
         plt.show()
@@ -341,7 +342,7 @@ class MultiPhaseSolver(Solver):
     Multi=phase solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, cond={1:1}, precision=cp.single, bc=(-0.5, 0.5)):
+    def __init__(self, img, cond={1:1}, bc=(-0.5, 0.5)):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -357,7 +358,7 @@ class MultiPhaseSolver(Solver):
         if 0 in cond.values():
             raise ValueError('0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
-        super().__init__(img, precision, bc)
+        super().__init__(img, bc)
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
         self.semi_converged = False
@@ -369,46 +370,45 @@ class MultiPhaseSolver(Solver):
             self.D_mean=0
     def init_nn(self, img):
         #conductivity map
-        img2 = cp.zeros_like(img)
+        img2 = pt.zeros_like(img)
         for ph in self.cond:
             c = self.cond[ph]
             img2[img == ph] = c
         img2 = self.pad(self.pad(img2))
         img2[:, 1] = img2[:, 2]
         img2[:, -2] = img2[:, -3]
-        nn = cp.zeros_like(img2, dtype=self.precision)
+        nn = pt.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
         nn_list = []
         for dim in range(1, 4):
             for dr in [1, -1]:
-                shift = cp.roll(img2, dr, dim)
+                shift = pt.roll(img2, dr, dim)
                 sum = img2 + shift
                 sum[shift==0] = 0
                 sum[img2==0] = 0
                 sum = 1/sum
-                sum[sum == cp.inf] = 0
+                sum[sum == pt.inf] = 0
                 nn += sum
-                nn_list.append(self.crop(sum, 1))
+                nn_list.append(self.crop(sum, 1).cuda())
         # remove the two paddings
         nn = self.crop(nn, 2)
         # avoid div 0 errors
-        nn[img == 0] = cp.inf
-        nn[nn == 0] = cp.inf
-        nn_list.insert(0, nn)
+        nn[img == 0] = pt.inf
+        nn[nn == 0] = pt.inf
+        nn_list.insert(0, nn.cuda())
         return nn_list
 
     def init_conc(self, img):
         bs, x, y, z = img.shape
         sh = 1 / (x + 1)
-        vec = cp.linspace(self.top_bc + sh, self.bot_bc - sh, x)
+        vec = pt.linspace(self.top_bc + sh, self.bot_bc - sh, x)
         for i in range(2):
-            vec = cp.expand_dims(vec, -1)
-        vec = cp.expand_dims(vec, 0)
-        vec = vec.repeat(z, -1)
-        vec = vec.repeat(y, -2)
-        vec = vec.repeat(bs, 0)
-        vec = vec.astype(self.precision)
-        img1 = cp.array(img)
+            vec = pt.unsqueeze(vec, -1)
+        vec = pt.unsqueeze(vec, 0)
+        vec = vec.repeat(bs, 1, y, z)
+        vec = vec.cuda()
+        # vec = vec.astype(self.precision)
+        img1 = pt.tensor(img).cuda()
         img1[img1 > 1] = 1
         return self.pad(img1 * vec, [self.top_bc, self.bot_bc])
 
@@ -449,8 +449,8 @@ class MultiPhaseSolver(Solver):
         if self.iter % 100 == 0:
             self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
             b, x, y, z = self.cpu_img.shape
-            self.D_eff = self.new_fl*(x+1)/(y*z)
-            self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else cp.inf
+            self.D_eff = (self.new_fl*(x+1)/(y*z)).cpu()
+            self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else pt.inf
             if self.semi_converged == 'zero_flux':
                 return True
 
@@ -470,28 +470,28 @@ class MultiPhaseSolver(Solver):
                 return False
 
         # increase precision to double if currently single
-        if self.iter >= iter_limit:
-            if self.precision == cp.single:
-                print('increasing precision to double')
-                self.iter = 0
-                self.conc = cp.array(self.conc, dtype=cp.double)
-                self.nn = cp.array(self.nn, dtype=cp.double)
-                self.precision = cp.double
-            else:
-                return True
+        # if self.iter >= iter_limit:
+        #     # if self.precision == cp.single:
+        #     #     print('increasing precision to double')
+        #     #     self.iter = 0
+        #     #     self.conc = cp.array(self.conc, dtype=cp.double)
+        #     #     self.nn = cp.array(self.nn, dtype=cp.double)
+        #     #     self.precision = cp.double
+        #     else:
+        #         return True
 
         return False
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = (self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]) * self.pre_factors[1][:, :-2, 1:-1, 1:-1]
-        vert_flux[self.nn == cp.inf] = 0
-        fl = cp.sum(vert_flux, (0, 2, 3))
+        vert_flux[self.nn == pt.inf] = 0
+        fl = pt.sum(vert_flux, (0, 2, 3))
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or np.isnan(err).item():
-            return True, cp.mean(fl), err
+        if err < conv_crit or pt.isnan(err).item():
+            return True, pt.mean(fl), err
         if fl.min() == 0:
-            return 'zero_flux', cp.mean(fl), err
-        return False, cp.mean(fl), err
+            return 'zero_flux', pt.mean(fl), err
+        return False, pt.mean(fl), err
 
 class ElectrodeSolver():
     """
@@ -499,12 +499,11 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
     
-    def __init__(self, img, precision=cp.double, omega=1e-6):
+    def __init__(self, img, omega=1e-6):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img
-        self.precision = precision
-        
+        self.precision= pt.double
         # Define omega, res and c_DL
         self.omega = omega
         self.res = 1
@@ -519,7 +518,7 @@ class ElectrodeSolver():
         self.VF = np.mean(img)
 
         # save original image in cuda
-        img = cp.array(img, dtype=self.precision)
+        img = pt.tensor(img, dtype=self.precision)
         self.img = img
         # init phi
         
@@ -533,7 +532,7 @@ class ElectrodeSolver():
         
 
         #checkerboarding
-        self.w = 2 - cp.pi / (1.5 * img.shape[1])
+        self.w = 2 - pt.pi / (1.5 * img.shape[1])
         # self.w = 1.8
         # self.w = 0.01
         self.cb = self.init_cb(img)
@@ -554,12 +553,12 @@ class ElectrodeSolver():
             vals.append(0)
         if len(img.shape)==4:
             to_pad = [1]*8
-            to_pad[:2] = (0, 0)
+            to_pad[-2:] = (0, 0)
         elif len(img.shape)==3:
             to_pad = [1]*6
-            to_pad[:2] = (0, 0)
+            to_pad[-2:] = (0, 0)
 
-        img = cp.pad(img, to_pad, 'constant')
+        img = pt.nn.functional.pad(img, to_pad, 'constant')
         img[:, 0], img[:, -1] = vals[:2]
         img[:, :, 0], img[:, :, -1] = vals[2:4]
 
@@ -578,11 +577,11 @@ class ElectrodeSolver():
         Initialise phi field as zeros
 
         :param img: input image, with 1s conductive and 0s non-conductive
-        :type img: cp.array
+        :type img: pt.array
         :return: phi
-        :rtype: cp.array
+        :rtype: pt.array
         """
-        phi = cp.zeros_like(img, dtype=self.precision)+0j
+        phi = pt.zeros_like(img, dtype=self.precision)+0j
         phi = self.pad(phi, [1, 0])
         return phi
     
@@ -593,14 +592,14 @@ class ElectrodeSolver():
             cb = np.zeros([x, y, z])
             a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
             cb[(a + b + c) % 2 == 0] = 1*self.w
-            return [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
+            return [pt.roll(pt.tensor(cb), sh, 0) for sh in [0, 1]]
 
         elif len(img.shape)==3:
             bs, x, y = img.shape
             cb = np.zeros([x, y])
             a, b = np.meshgrid(range(x), range(y), indexing='ij')
             cb[(a + b) % 2 == 0] = 1*self.w
-            cb = [cp.roll(cp.array(cb), sh, 0) for sh in [0, 1]]
+            cb = [pt.roll(pt.tensor(cb), sh, 0) for sh in [0, 1]]
             cb[1][0] = cb[1][2]
             return cb
 
@@ -617,11 +616,11 @@ class ElectrodeSolver():
         dims = (len(img.shape)-1)*2
         # find number of conducting nearest neighbours
         img2 = self.pad(img, [1,0])
-        nn_cond = cp.zeros_like(img2, dtype=self.precision)
+        nn_cond = pt.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, len(img.shape)):
             for dr in [1, -1]:
-                nn_cond += cp.roll(img2, dr, dim)
+                nn_cond += pt.roll(img2, dr, dim)
         # remove the paddings
         nn_cond = self.crop(nn_cond, 1)
         self.nn = nn_cond
@@ -630,7 +629,7 @@ class ElectrodeSolver():
         omegapf = (orc**2 + 1j*orc)/(orc**2+1)
         prefactor = (nn_cond + 2*nn_solid*omegapf)**-1
         # prefactor = (nn_cond+2j*self.omega*self.res*self.c_DL*(dims-nn_cond))**-1
-        prefactor[prefactor==cp.inf] = 0
+        prefactor[prefactor==pt.inf] = 0
         prefactor[img==0] = 0
         return prefactor
     
@@ -639,9 +638,9 @@ class ElectrodeSolver():
         for dim in range(1, len(self.phi.shape)):
             for dr in [1, -1]:
                 if i==0:
-                    out = cp.roll(self.phi, dr, dim)
+                    out = pt.roll(self.phi, dr, dim)
                 else:
-                    out += cp.roll(self.phi, dr, dim)
+                    out += pt.roll(self.phi, dr, dim)
                 i+=1
 
         out = self.crop(out, 1)
@@ -687,7 +686,7 @@ class ElectrodeSolver():
         r_ion = z.real*3
         tau_e = self.VF * r_ion * self.k_0 * self.A_CC / self.phi.shape[1]
 
-        return tau_e.get()
+        return tau_e.cpu()
 
 
 
