@@ -66,4 +66,4 @@ pytest
 
 ## Credits
 
-This package was created by the tldr group at the Dyson School of Design Engineering, Imperial College London.
+This package was created by the [tldr group](https://tldr-group.github.io/) at the Dyson School of Design Engineering, Imperial College London.
