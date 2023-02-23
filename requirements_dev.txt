@@ -11,3 +11,4 @@ Click==7.0
 pytest==4.6.5
 matplotlib==4.3.3
 pytest-runner==5.2
+numpy==1.24.2

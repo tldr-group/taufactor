@@ -5,7 +5,6 @@ from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 from taufactor.metrics import surface_area
 import torch as pt
-import cupy as cp
 import tifffile
 import taufactor
 class Solver:

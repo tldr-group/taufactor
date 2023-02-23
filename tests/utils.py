@@ -1,5 +1,4 @@
 import numpy as np
-import cupy as cp
 
 def generate_checkerboard(size, d=3):
     if d==2:
