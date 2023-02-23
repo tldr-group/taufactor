@@ -26,7 +26,13 @@ Before installing taufactor, [download the most recent version of PyTorch](https
 
 ## Quickstart
 
-A basic example for taufactor:
+To install TauFactor via PyPI
+
+```
+pip install taufactor
+```
+
+To extract effective diffusivity and tortuosity factor from your data:
 
 ```python
 import taufactor as tau
@@ -34,15 +40,16 @@ import taufactor as tau
 # load image
 img = tifffile.imread('path/filename')
 # ensure 1s for conductive phase and 0s otherwise.
-# here we perform an example segmentation on a grayscale img
-img[img > 0.7] = 1
-img[img != 1] = 0
-# create a solver object
+
+# create a solver object with loaded image
 s = tau.Solver(img)
+
 # call solve function
 s.solve()
-# view effective diffusivity
-D_eff = s.D_eff
+
+# view effective diffusivity and tau
+print(s.D_eff, s.tau)
+
 # plot steady state maps
 s.flux_map()
 s.conc_map()
@@ -60,8 +67,3 @@ pytest
 ## Credits
 
 This package was created by the tldr group at the Dyson School of Design Engineering, Imperial College London.
-This package was created with Cookiecutter* and the `audreyr/cookiecutter-pypackage`* project template.
-
-[Cookiecutter](https://github.com/audreyr/cookiecutter)
-
-[`audreyr/cookiecutter-pypackage`](https://github.com/audreyr/cookiecutter-pypackage)
