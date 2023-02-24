@@ -8,7 +8,7 @@ This documentation covers the full usage of TauFactor
 
 The main output of the solve function is `tau` and `D_eff`. `tau` is the tortuoisty factor, a measure of the reduction in diffusive transport caused by convolution in the geometry of the material. `D_eff` is the effective diffusivity resulting from the tortuous nature of the material. The relationship between these values is given by:
 
-$D_{eff}=D\frac{\epsilon}{\tau}$
+{math}`D_{eff}=D\frac{\epsilon}{\tau}`
 
 For more see [Cooper _et al._](https://doi.org/10.1016/j.softx.2016.09.002)
 
