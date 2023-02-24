@@ -12,7 +12,7 @@ class Solver:
     Default solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, bc=(-0.5, 0.5), D_0=1):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=pt.device('cuda:0')):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -21,6 +21,7 @@ class Solver:
         :param precision:  cp.single or cp.double
         :param bc: Upper and lower boundary conditions. Leave as default.
         :param D_0: reference material diffusivity
+        :param device: pytorch device, can be cuda or cpu 
         """
         # add batch dim now for consistency
         self.D_0 = D_0
@@ -29,37 +30,37 @@ class Solver:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = pt.float
+        self.device = device
         # VF calc
         self.VF = np.mean(img)
         # save original image in cuda
         img = pt.tensor(img, dtype=self.precision)
-        self.ph_bot = pt.sum(img[:, -1]).cuda() * self.bot_bc
-        self.ph_top = pt.sum(img[:, 0]).cuda() * self.top_bc
-
+        # calculate 
+        self.ph_bot = pt.sum(img[:, -1]).to(self.device) * self.bot_bc
+        self.ph_top = pt.sum(img[:, 0]).to(self.device) * self.top_bc
         # init conc
         self.conc = self.init_conc(img)
         # create nn map
         self.nn = self.init_nn(img)
-
-        #checkerboarding
+        # overrelaxation factor
         self.w = 2 - pt.pi / (1.5 * img.shape[1])
+        # checkerboarding to ensure stable steps
         self.cb = self.init_cb(img)
-
-        # solving params
         bs, x, y, z = self.cpu_img.shape
         self.L_A = x / (z * y)
+        # solving params
         self.converged = False
         self.semi_converged = False
         self.old_fl = -1
         self.iter=0
         img = None
-
         # Results
         self.tau=None
         self.D_eff=None
         self.D_mean=None
 
     def init_conc(self, img):
+        """Sets an initial linear field across the volume"""
         bs, x, y, z = img.shape
         sh = 1 / (x * 2)
         vec = pt.linspace(self.top_bc + sh, self.bot_bc - sh, x, dtype=self.precision)
@@ -67,9 +68,10 @@ class Solver:
             vec = pt.unsqueeze(vec, -1)
         vec = pt.unsqueeze(vec, 0)
         vec = vec.repeat(bs, 1,y, z, )
-        return self.pad(img * vec, [self.top_bc * 2, self.bot_bc * 2]).cuda()
+        return self.pad(img * vec, [self.top_bc * 2, self.bot_bc * 2]).to(self.device)
 
     def init_nn(self, img):
+        """Saves the number of conductive neighbours for flux calculation"""
         img2 = self.pad(self.pad(img, [2, 2]))
         nn = pt.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
@@ -81,17 +83,20 @@ class Solver:
         # avoid div 0 errors
         nn[img == 0] = pt.inf
         nn[nn == 0] = pt.inf
-        return nn.cuda()
+        return nn.to(self.device)
 
     def init_cb(self, img):
+        """Creates a chequerboard to ensure neighbouring pixels dont update,
+        which can cause instability"""
         bs, x, y, z = img.shape
         cb = np.zeros([x, y, z])
         a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
         cb[(a + b + c) % 2 == 0] = 1
         cb *= self.w
-        return [pt.roll(pt.tensor(cb, dtype=self.precision).cuda(), sh, 0) for sh in [0, 1]]
+        return [pt.roll(pt.tensor(cb, dtype=self.precision).to(self.device), sh, 0) for sh in [0, 1]]
 
     def pad(self, img, vals=[0] * 6):
+        """Pads a volume with values"""
         while len(vals) < 6:
             vals.append(0)
         to_pad = [1]*8
@@ -103,6 +108,7 @@ class Solver:
         return img
 
     def crop(self, img, c = 1):
+        """removes a layer from the volume edges"""
         return img[:, c:-c, c:-c, c:-c]
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
@@ -120,16 +126,19 @@ class Solver:
         with pt.no_grad():
             start = timer()
             while not self.converged:
+                # find sum of all nearest neighbours
                 out = self.conc[:, 2:, 1:-1, 1:-1] + \
                     self.conc[:, :-2, 1:-1, 1:-1] + \
                     self.conc[:, 1:-1, 2:, 1:-1] + \
                     self.conc[:, 1:-1, :-2, 1:-1] + \
                     self.conc[:, 1:-1, 1:-1, 2:] + \
                     self.conc[:, 1:-1, 1:-1, :-2]
-                    
+                # divide by n conductive nearest neighbours to give flux
                 out /= self.nn
-                if self.iter % 20 == 0:
+                # check convergence using criteria
+                if self.iter % 100 == 0:
                     self.converged = self.check_convergence(verbose, conv_crit, start, iter_limit)
+                # efficient way of adding flux to old conc with overrelaxation
                 out -= self.crop(self.conc, 1)
                 out *= self.cb[self.iter%2]
                 self.conc[:, 1:-1, 1:-1, 1:-1] += out
@@ -141,40 +150,26 @@ class Solver:
 
     def check_convergence(self, verbose, conv_crit, start, iter_limit):
         # print progress
-        if self.iter % 100 == 0:
-            self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
-            self.D_rel = ((self.new_fl) * self.L_A / abs(self.top_bc - self.bot_bc)).cpu()
-            self.tau=self.VF/self.D_rel if self.D_rel != 0 else pt.inf
-            if self.semi_converged == 'zero_flux':
-                return True
+        self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
+        self.D_rel = ((self.new_fl) * self.L_A / abs(self.top_bc - self.bot_bc)).cpu()
+        self.tau=self.VF/self.D_rel if self.D_rel != 0 else pt.inf
+        if self.semi_converged == 'zero_flux':
+            return True
 
-            if verbose == 'per_iter':
-                print(self.iter, abs(err), self.tau)
+        if verbose == 'per_iter':
+            print(self.iter, abs(err), self.tau)
 
-            if self.semi_converged:
-                self.converged = self.check_rolling_mean(conv_crit=1e-3)
+        if self.semi_converged:
+            self.converged = self.check_rolling_mean(conv_crit=1e-3)
 
-                if not self.converged:
-                    self.old_fl = self.new_fl
-                    return False
-                else:
-                    return True
-            else:
+            if not self.converged:
                 self.old_fl = self.new_fl
                 return False
-
-        # increase precision to double if currently single
-        if self.iter >= iter_limit:
-            # if self.precision == cp.single:
-            #     print('increasing precision to double')
-            #     self.iter = 0
-            #     self.conc = cp.array(self.conc, dtype=cp.double)
-            #     self.nn = cp.array(self.nn, dtype=cp.double)
-            #     self.precision = cp.double
-            # else:
+            else:
                 return True
-
-        return False
+        else:
+            self.old_fl = self.new_fl
+            return False
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]
@@ -239,7 +234,7 @@ class PeriodicSolver(Solver):
     Periodic Solver (works for non-periodic structures, but has higher RAM requirements)
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, bc=(-0.5, 0.5), D_0=1):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=pt.device('cuda:0')):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -250,8 +245,8 @@ class PeriodicSolver(Solver):
         :param D_0: reference material diffusivity
 
         """
-        super().__init__(img, bc, D_0)
-        self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2].cuda()
+        super().__init__(img, bc, D_0, device)
+        self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2].to(self.device)
 
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))[:, :, 2:-2, 2:-2]
@@ -264,7 +259,7 @@ class PeriodicSolver(Solver):
         nn = nn[:, 2:-2]
         nn[img == 0] = pt.inf
         nn[nn == 0] = pt.inf
-        return nn.cuda()
+        return nn.to(self.device)
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, D_0=1):
         """
@@ -341,7 +336,7 @@ class MultiPhaseSolver(Solver):
     Multi=phase solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, cond={1:1}, bc=(-0.5, 0.5)):
+    def __init__(self, img, cond={1:1}, bc=(-0.5, 0.5), device=pt.device('cuda:0')):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -357,7 +352,7 @@ class MultiPhaseSolver(Solver):
         if 0 in cond.values():
             raise ValueError('0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
-        super().__init__(img, bc)
+        super().__init__(img, bc, device=device)
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
         self.semi_converged = False
@@ -388,13 +383,13 @@ class MultiPhaseSolver(Solver):
                 sum = 1/sum
                 sum[sum == pt.inf] = 0
                 nn += sum
-                nn_list.append(self.crop(sum, 1).cuda())
+                nn_list.append(self.crop(sum, 1).to(self.device))
         # remove the two paddings
         nn = self.crop(nn, 2)
         # avoid div 0 errors
         nn[img == 0] = pt.inf
         nn[nn == 0] = pt.inf
-        nn_list.insert(0, nn.cuda())
+        nn_list.insert(0, nn.to(self.device))
         return nn_list
 
     def init_conc(self, img):
@@ -405,9 +400,9 @@ class MultiPhaseSolver(Solver):
             vec = pt.unsqueeze(vec, -1)
         vec = pt.unsqueeze(vec, 0)
         vec = vec.repeat(bs, 1, y, z)
-        vec = vec.cuda()
+        vec = vec.to(self.device)
         # vec = vec.astype(self.precision)
-        img1 = pt.tensor(img).cuda()
+        img1 = pt.tensor(img).to(self.device)
         img1[img1 > 1] = 1
         return self.pad(img1 * vec, [self.top_bc, self.bot_bc])
 
@@ -498,11 +493,12 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
     
-    def __init__(self, img, omega=1e-6):
+    def __init__(self, img, omega=1e-6, device=pt.device('cuda:0')):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img
-        self.precision= pt.double
+        self.precision = pt.double
+        self.device = device
         # Define omega, res and c_DL
         self.omega = omega
         self.res = 1
@@ -517,7 +513,7 @@ class ElectrodeSolver():
         self.VF = np.mean(img)
 
         # save original image in cuda
-        img = pt.tensor(img, dtype=self.precision)
+        img = pt.tensor(img, dtype=self.precision).to(self.device)
         self.img = img
         # init phi
         
@@ -582,7 +578,7 @@ class ElectrodeSolver():
         """
         phi = pt.zeros_like(img, dtype=self.precision)+0j
         phi = self.pad(phi, [1, 0])
-        return phi
+        return phi.to(self.device)
     
     def init_cb(self, img):
 
@@ -591,14 +587,14 @@ class ElectrodeSolver():
             cb = np.zeros([x, y, z])
             a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
             cb[(a + b + c) % 2 == 0] = 1*self.w
-            return [pt.roll(pt.tensor(cb), sh, 0) for sh in [0, 1]]
+            return [pt.roll(pt.tensor(cb), sh, 0).to(self.device) for sh in [0, 1]]
 
         elif len(img.shape)==3:
             bs, x, y = img.shape
             cb = np.zeros([x, y])
             a, b = np.meshgrid(range(x), range(y), indexing='ij')
             cb[(a + b) % 2 == 0] = 1*self.w
-            cb = [pt.roll(pt.tensor(cb), sh, 0) for sh in [0, 1]]
+            cb = [pt.roll(pt.tensor(cb).to(self.device), sh, 0) for sh in [0, 1]]
             cb[1][0] = cb[1][2]
             return cb
 
@@ -630,7 +626,7 @@ class ElectrodeSolver():
         # prefactor = (nn_cond+2j*self.omega*self.res*self.c_DL*(dims-nn_cond))**-1
         prefactor[prefactor==pt.inf] = 0
         prefactor[img==0] = 0
-        return prefactor
+        return prefactor.to(self.device)
     
     def sum_neighbours(self):
         i=0
