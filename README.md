@@ -18,6 +18,9 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 <a href="https://opensource.org/licenses/MIT">
         <img src="https://img.shields.io/badge/License-MIT-yellow.svg"
             alt="MIT LICENSE"></a>
+<img src="https://github.com/tldr-group/taufactor/actions/workflows/taufactor.yml/badge.svg"
+        alt="github actions">
+
 </p>
 
 ## Requirements
