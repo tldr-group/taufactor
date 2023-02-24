@@ -1,3 +1,5 @@
+name: JOSS Paper Compile
+
 on: [push]
 
 jobs:
