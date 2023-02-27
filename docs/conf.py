@@ -47,7 +47,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'TauFactor'
-copyright = "2021, Isaac Squires"
+copyright = "2023, Isaac Squires"
 author = "Isaac Squires"
 
 # The version info for the project you're documenting, acts as replacement
