@@ -37,7 +37,7 @@ img = tifffile.imread('path/filename')
 flux_direction(img)
 ```
 
-When the flux direction has been chosen, the image can be permuted using `torch.permute` as outlined in the output from flux direction, for example
+When the flux direction has been chosen, the image can be permuted using `torch.permute` as outlined in the output from `flux_direction`, for example
 
 ```python
 import taufactor as tau

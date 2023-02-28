@@ -1,12 +1,9 @@
 """Main module."""
-from math import tau
 import numpy as np
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
-from taufactor.metrics import surface_area
 import torch as pt
-import tifffile
-import taufactor
+
 class Solver:
     """
     Default solver for two phase images. Once solve method is
@@ -190,34 +187,6 @@ class Solver:
         else:
             return False
 
-    def conc_map(self, lay=0):
-        """
-        Plots a concentration map perpendicular to the direction of flow
-        :param lay: depth to plot
-        :return: 3D conc map
-        """
-        img = self.conc[0, 1:-1, 1:-1, 1:-1].cpu()
-        img[self.cpu_img[0, :, :, :] == 0] = -1
-        plt.imshow(img[:, :, lay])
-        plt.show()
-        return img
-
-    def flux_map(self, lay=0):
-        """
-        Plots a flux map perpendicular to the direction of flow
-        :param lay: depth to plot
-        :return: 3D flux map
-        """
-        flux = pt.zeros_like(self.conc)
-        ph_map = self.pad(pt.tensor(self.cpu_img))
-        for dim in range(1, 4):
-            for dr in [1, -1]:
-                flux += abs(pt.roll(self.conc, dr, dim) - self.conc) * pt.roll(ph_map, dr, dim)
-        flux = flux[0, 2:-2, 1:-1, 1:-1].cpu()
-        flux[self.cpu_img[0, 1:-1] == 0] = 0
-        plt.imshow(flux[:, :, lay])
-        return flux
-
     def end_simulation(self, iter_limit, verbose, start):
         converged = 'converged to'
         if self.iter >=iter_limit -1:
@@ -304,32 +273,6 @@ class PeriodicSolver(Solver):
             return 'zero_flux', pt.mean(fl), err
         return False, pt.mean(fl), err
 
-    def flux_map(self, lay=0):
-        """
-        Plots a flux map perpendicular to the direction of flow
-        :param lay: depth to plot
-        :return: 3D flux map
-        """
-        flux = pt.zeros_like(self.conc)
-        ph_map = self.pad(self.pad(pt.tensor(self.cpu_img)))[:, :, 2:-2, 2:-2]
-        for dim in range(1, 4):
-            for dr in [1, -1]:
-                flux += abs(pt.roll(self.conc, dr, dim) - self.conc) * pt.roll(ph_map, dr, dim)
-        flux = flux[0, 2:-2].cpu()
-        flux[self.cpu_img[0] == 0] = 0
-        plt.imshow(flux[:, :, lay])
-        return flux
-
-    def conc_map(self, lay=0):
-        """
-        Plots a concentration map perpendicular to the direction of flow
-        :param lay: depth to plot
-        :return: 3D conc map
-        """
-        img = self.conc[0, 2:-2].cpu()
-        img[self.cpu_img[0] == 0] = -1
-        plt.imshow(img[:, :, lay])
-        plt.show()
 
 class MultiPhaseSolver(Solver):
     """
@@ -733,8 +676,4 @@ class ElectrodeSolver():
         converged = 'converged to'
         if self.verbose:
             print(f'{converged}: {self.tau_e} after: {self.iter} iterations in: {np.around(timer() - self.start, 4)} seconds at a rate of {np.around((timer() - self.start)/self.iter, 4)} s/iter')
-
-
-
-
 
