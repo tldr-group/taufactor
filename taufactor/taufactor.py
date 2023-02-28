@@ -1,18 +1,15 @@
 """Main module."""
-from math import tau
 import numpy as np
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
-from taufactor.metrics import surface_area
-import torch as pt
-import tifffile
-import taufactor
+import torch
+
 class Solver:
     """
     Default solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=pt.device('cuda:0')):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda:0')):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -29,21 +26,23 @@ class Solver:
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
-        self.precision = pt.float
+        self.precision = torch.float
         self.device = device
-        # VF calc
-        self.VF = np.mean(img)
         # save original image in cuda
-        img = pt.tensor(img, dtype=self.precision)
+        img = torch.tensor(img, dtype=self.precision)
+        self.VF = torch.mean(img)
+        if len(torch.unique(img).shape)>2 or torch.unique(img).max() != 1 or torch.unique(img).min() != 0:
+            raise ValueError(f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
+
         # calculate 
-        self.ph_bot = pt.sum(img[:, -1]).to(self.device) * self.bot_bc
-        self.ph_top = pt.sum(img[:, 0]).to(self.device) * self.top_bc
+        self.ph_bot = torch.sum(img[:, -1]).to(self.device) * self.bot_bc
+        self.ph_top = torch.sum(img[:, 0]).to(self.device) * self.top_bc
         # init conc
         self.conc = self.init_conc(img)
         # create nn map
         self.nn = self.init_nn(img)
         # overrelaxation factor
-        self.w = 2 - pt.pi / (1.5 * img.shape[1])
+        self.w = 2 - torch.pi / (1.5 * img.shape[1])
         # checkerboarding to ensure stable steps
         self.cb = self.init_cb(img)
         bs, x, y, z = self.cpu_img.shape
@@ -63,26 +62,26 @@ class Solver:
         """Sets an initial linear field across the volume"""
         bs, x, y, z = img.shape
         sh = 1 / (x * 2)
-        vec = pt.linspace(self.top_bc + sh, self.bot_bc - sh, x, dtype=self.precision)
+        vec = torch.linspace(self.top_bc + sh, self.bot_bc - sh, x, dtype=self.precision)
         for i in range(2):
-            vec = pt.unsqueeze(vec, -1)
-        vec = pt.unsqueeze(vec, 0)
+            vec = torch.unsqueeze(vec, -1)
+        vec = torch.unsqueeze(vec, 0)
         vec = vec.repeat(bs, 1,y, z, )
         return self.pad(img * vec, [self.top_bc * 2, self.bot_bc * 2]).to(self.device)
 
     def init_nn(self, img):
         """Saves the number of conductive neighbours for flux calculation"""
         img2 = self.pad(self.pad(img, [2, 2]))
-        nn = pt.zeros_like(img2, dtype=self.precision)
+        nn = torch.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, 4):
             for dr in [1, -1]:
-                nn += pt.roll(img2, dr, dim)
+                nn += torch.roll(img2, dr, dim)
         # remove the two paddings
         nn = self.crop(nn, 2)
         # avoid div 0 errors
-        nn[img == 0] = pt.inf
-        nn[nn == 0] = pt.inf
+        nn[img == 0] = torch.inf
+        nn[nn == 0] = torch.inf
         return nn.to(self.device)
 
     def init_cb(self, img):
@@ -93,7 +92,7 @@ class Solver:
         a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
         cb[(a + b + c) % 2 == 0] = 1
         cb *= self.w
-        return [pt.roll(pt.tensor(cb, dtype=self.precision).to(self.device), sh, 0) for sh in [0, 1]]
+        return [torch.roll(torch.tensor(cb, dtype=self.precision).to(self.device), sh, 0) for sh in [0, 1]]
 
     def pad(self, img, vals=[0] * 6):
         """Pads a volume with values"""
@@ -101,7 +100,7 @@ class Solver:
             vals.append(0)
         to_pad = [1]*8
         to_pad[-2:] = (0, 0)
-        img = pt.nn.functional.pad(img, to_pad, 'constant')
+        img = torch.nn.functional.pad(img, to_pad, 'constant')
         img[:, 0], img[:, -1] = vals[:2]
         img[:, :, 0], img[:, :, -1] = vals[2:4]
         img[:, :, :, 0], img[:, :, :, -1] = vals[4:]
@@ -115,7 +114,7 @@ class Solver:
         """
         run a solve simulation
 
-        :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
+        :param iter_limit: max iterations before aborting, will attemtorch double for the same no. iterations
         if initialised as singles
         :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
         :param conv_crit: convergence criteria, minimum percent difference between
@@ -123,7 +122,7 @@ class Solver:
         :return: tau
         """
         
-        with pt.no_grad():
+        with torch.no_grad():
             start = timer()
             while not self.converged:
                 # find sum of all nearest neighbours
@@ -152,7 +151,7 @@ class Solver:
         # print progress
         self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
         self.D_rel = ((self.new_fl) * self.L_A / abs(self.top_bc - self.bot_bc)).cpu()
-        self.tau=self.VF/self.D_rel if self.D_rel != 0 else pt.inf
+        self.tau=self.VF/self.D_rel if self.D_rel != 0 else torch.inf
         if self.semi_converged == 'zero_flux':
             return True
 
@@ -175,13 +174,13 @@ class Solver:
         vert_flux = self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]
         vert_flux[self.conc[:, :-2, 1:-1, 1:-1] == 0] = 0
         vert_flux[self.conc[:, 1:-1, 1:-1, 1:-1] == 0] = 0
-        fl = pt.sum(vert_flux, (0, 2, 3))[1:-1]
+        fl = torch.sum(vert_flux, (0, 2, 3))[1:-1]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or pt.isnan(err).item():
-            return True, pt.mean(fl), err
+        if err < conv_crit or torch.isnan(err).item():
+            return True, torch.mean(fl), err
         if fl.min() == 0:
-            return 'zero_flux', pt.mean(fl), err
-        return False, pt.mean(fl), err
+            return 'zero_flux', torch.mean(fl), err
+        return False, torch.mean(fl), err
     
     def check_rolling_mean(self, conv_crit):
         err = (self.new_fl - self.old_fl) / (self.new_fl + self.old_fl)
@@ -189,34 +188,6 @@ class Solver:
             return True
         else:
             return False
-
-    def conc_map(self, lay=0):
-        """
-        Plots a concentration map perpendicular to the direction of flow
-        :param lay: depth to plot
-        :return: 3D conc map
-        """
-        img = self.conc[0, 1:-1, 1:-1, 1:-1].cpu()
-        img[self.cpu_img[0, :, :, :] == 0] = -1
-        plt.imshow(img[:, :, lay])
-        plt.show()
-        return img
-
-    def flux_map(self, lay=0):
-        """
-        Plots a flux map perpendicular to the direction of flow
-        :param lay: depth to plot
-        :return: 3D flux map
-        """
-        flux = pt.zeros_like(self.conc)
-        ph_map = self.pad(pt.tensor(self.cpu_img))
-        for dim in range(1, 4):
-            for dr in [1, -1]:
-                flux += abs(pt.roll(self.conc, dr, dim) - self.conc) * pt.roll(ph_map, dr, dim)
-        flux = flux[0, 2:-2, 1:-1, 1:-1].cpu()
-        flux[self.cpu_img[0, 1:-1] == 0] = 0
-        plt.imshow(flux[:, :, lay])
-        return flux
 
     def end_simulation(self, iter_limit, verbose, start):
         converged = 'converged to'
@@ -234,7 +205,7 @@ class PeriodicSolver(Solver):
     Periodic Solver (works for non-periodic structures, but has higher RAM requirements)
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=pt.device('cuda:0')):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda:0')):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -250,22 +221,22 @@ class PeriodicSolver(Solver):
 
     def init_nn(self, img):
         img2 = self.pad(self.pad(img, [2, 2]))[:, :, 2:-2, 2:-2]
-        nn = pt.zeros_like(img2)
+        nn = torch.zeros_like(img2)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, 4):
             for dr in [1, -1]:
-                nn += pt.roll(img2, dr, dim)
+                nn += torch.roll(img2, dr, dim)
         # avoid div 0 errors
         nn = nn[:, 2:-2]
-        nn[img == 0] = pt.inf
-        nn[nn == 0] = pt.inf
+        nn[img == 0] = torch.inf
+        nn[nn == 0] = torch.inf
         return nn.to(self.device)
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, D_0=1):
         """
         run a solve simulation
 
-        :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
+        :param iter_limit: max iterations before aborting, will attemtorch double for the same no. iterations
         if initialised as singles
         :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
         :param conv_crit: convergence criteria, minimum percent difference between
@@ -274,10 +245,10 @@ class PeriodicSolver(Solver):
         """
         start = timer()
         while not self.converged:
-            out = pt.zeros_like(self.conc)
+            out = torch.zeros_like(self.conc)
             for dim in range(1, 4):
                 for dr in [1, -1]:
-                    out += pt.roll(self.conc, dr, dim)
+                    out += torch.roll(self.conc, dr, dim)
             out = out[:, 2:-2]
             out /= self.nn
             if self.iter % 50 == 0:
@@ -293,50 +264,24 @@ class PeriodicSolver(Solver):
         return self.tau
 
     def check_vertical_flux(self, conv_crit):
-        vert_flux = abs(self.conc - pt.roll(self.conc, 1, 1))
+        vert_flux = abs(self.conc - torch.roll(self.conc, 1, 1))
         vert_flux[self.conc == 0] = 0
-        vert_flux[pt.roll(self.conc, 1, 1) == 0] = 0
-        fl = pt.sum(vert_flux, (0, 2, 3))[3:-2]
+        vert_flux[torch.roll(self.conc, 1, 1) == 0] = 0
+        fl = torch.sum(vert_flux, (0, 2, 3))[3:-2]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or pt.isnan(err).item():
-            return True, pt.mean(fl), err
+        if err < conv_crit or torch.isnan(err).item():
+            return True, torch.mean(fl), err
         if fl.min() == 0:
-            return 'zero_flux', pt.mean(fl), err
-        return False, pt.mean(fl), err
+            return 'zero_flux', torch.mean(fl), err
+        return False, torch.mean(fl), err
 
-    def flux_map(self, lay=0):
-        """
-        Plots a flux map perpendicular to the direction of flow
-        :param lay: depth to plot
-        :return: 3D flux map
-        """
-        flux = pt.zeros_like(self.conc)
-        ph_map = self.pad(self.pad(pt.tensor(self.cpu_img)))[:, :, 2:-2, 2:-2]
-        for dim in range(1, 4):
-            for dr in [1, -1]:
-                flux += abs(pt.roll(self.conc, dr, dim) - self.conc) * pt.roll(ph_map, dr, dim)
-        flux = flux[0, 2:-2].cpu()
-        flux[self.cpu_img[0] == 0] = 0
-        plt.imshow(flux[:, :, lay])
-        return flux
-
-    def conc_map(self, lay=0):
-        """
-        Plots a concentration map perpendicular to the direction of flow
-        :param lay: depth to plot
-        :return: 3D conc map
-        """
-        img = self.conc[0, 2:-2].cpu()
-        img[self.cpu_img[0] == 0] = -1
-        plt.imshow(img[:, :, lay])
-        plt.show()
 
 class MultiPhaseSolver(Solver):
     """
     Multi=phase solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, cond={1:1}, bc=(-0.5, 0.5), device=pt.device('cuda:0')):
+    def __init__(self, img, cond={1:1}, bc=(-0.5, 0.5), device=torch.device('cuda:0')):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -364,45 +309,45 @@ class MultiPhaseSolver(Solver):
             self.D_mean=0
     def init_nn(self, img):
         #conductivity map
-        img2 = pt.zeros_like(img)
+        img2 = torch.zeros_like(img)
         for ph in self.cond:
             c = self.cond[ph]
             img2[img == ph] = c
         img2 = self.pad(self.pad(img2))
         img2[:, 1] = img2[:, 2]
         img2[:, -2] = img2[:, -3]
-        nn = pt.zeros_like(img2, dtype=self.precision)
+        nn = torch.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
         nn_list = []
         for dim in range(1, 4):
             for dr in [1, -1]:
-                shift = pt.roll(img2, dr, dim)
+                shift = torch.roll(img2, dr, dim)
                 sum = img2 + shift
                 sum[shift==0] = 0
                 sum[img2==0] = 0
                 sum = 1/sum
-                sum[sum == pt.inf] = 0
+                sum[sum == torch.inf] = 0
                 nn += sum
                 nn_list.append(self.crop(sum, 1).to(self.device))
         # remove the two paddings
         nn = self.crop(nn, 2)
         # avoid div 0 errors
-        nn[img == 0] = pt.inf
-        nn[nn == 0] = pt.inf
+        nn[img == 0] = torch.inf
+        nn[nn == 0] = torch.inf
         nn_list.insert(0, nn.to(self.device))
         return nn_list
 
     def init_conc(self, img):
         bs, x, y, z = img.shape
         sh = 1 / (x + 1)
-        vec = pt.linspace(self.top_bc + sh, self.bot_bc - sh, x)
+        vec = torch.linspace(self.top_bc + sh, self.bot_bc - sh, x)
         for i in range(2):
-            vec = pt.unsqueeze(vec, -1)
-        vec = pt.unsqueeze(vec, 0)
+            vec = torch.unsqueeze(vec, -1)
+        vec = torch.unsqueeze(vec, 0)
         vec = vec.repeat(bs, 1, y, z)
         vec = vec.to(self.device)
         # vec = vec.astype(self.precision)
-        img1 = pt.tensor(img).to(self.device)
+        img1 = torch.tensor(img).to(self.device)
         img1[img1 > 1] = 1
         return self.pad(img1 * vec, [self.top_bc, self.bot_bc])
 
@@ -410,7 +355,7 @@ class MultiPhaseSolver(Solver):
         """
         run a solve simulation
 
-        :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
+        :param iter_limit: max iterations before aborting, will attemtorch double for the same no. iterations
         if initialised as singles
         :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
         :param conv_crit: convergence criteria, minimum percent difference between
@@ -444,7 +389,7 @@ class MultiPhaseSolver(Solver):
             self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
             b, x, y, z = self.cpu_img.shape
             self.D_eff = (self.new_fl*(x+1)/(y*z)).cpu()
-            self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else pt.inf
+            self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else torch.inf
             if self.semi_converged == 'zero_flux':
                 return True
 
@@ -478,14 +423,14 @@ class MultiPhaseSolver(Solver):
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = (self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:, :-2, 1:-1, 1:-1]) * self.pre_factors[1][:, :-2, 1:-1, 1:-1]
-        vert_flux[self.nn == pt.inf] = 0
-        fl = pt.sum(vert_flux, (0, 2, 3))
+        vert_flux[self.nn == torch.inf] = 0
+        fl = torch.sum(vert_flux, (0, 2, 3))
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or pt.isnan(err).item():
-            return True, pt.mean(fl), err
+        if err < conv_crit or torch.isnan(err).item():
+            return True, torch.mean(fl), err
         if fl.min() == 0:
-            return 'zero_flux', pt.mean(fl), err
-        return False, pt.mean(fl), err
+            return 'zero_flux', torch.mean(fl), err
+        return False, torch.mean(fl), err
 
 class ElectrodeSolver():
     """
@@ -493,11 +438,11 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
     
-    def __init__(self, img, omega=1e-6, device=pt.device('cuda:0')):
+    def __init__(self, img, omega=1e-6, device=torch.device('cuda:0')):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img
-        self.precision = pt.double
+        self.precision = torch.double
         self.device = device
         # Define omega, res and c_DL
         self.omega = omega
@@ -513,7 +458,7 @@ class ElectrodeSolver():
         self.VF = np.mean(img)
 
         # save original image in cuda
-        img = pt.tensor(img, dtype=self.precision).to(self.device)
+        img = torch.tensor(img, dtype=self.precision).to(self.device)
         self.img = img
         # init phi
         
@@ -527,7 +472,7 @@ class ElectrodeSolver():
         
 
         #checkerboarding
-        self.w = 2 - pt.pi / (1.5 * img.shape[1])
+        self.w = 2 - torch.pi / (1.5 * img.shape[1])
         # self.w = 1.8
         # self.w = 0.01
         self.cb = self.init_cb(img)
@@ -553,7 +498,7 @@ class ElectrodeSolver():
             to_pad = [1]*6
             to_pad[-2:] = (0, 0)
 
-        img = pt.nn.functional.pad(img, to_pad, 'constant')
+        img = torch.nn.functional.pad(img, to_pad, 'constant')
         img[:, 0], img[:, -1] = vals[:2]
         img[:, :, 0], img[:, :, -1] = vals[2:4]
 
@@ -572,11 +517,11 @@ class ElectrodeSolver():
         Initialise phi field as zeros
 
         :param img: input image, with 1s conductive and 0s non-conductive
-        :type img: pt.array
+        :type img: torch.array
         :return: phi
-        :rtype: pt.array
+        :rtype: torch.array
         """
-        phi = pt.zeros_like(img, dtype=self.precision)+0j
+        phi = torch.zeros_like(img, dtype=self.precision)+0j
         phi = self.pad(phi, [1, 0])
         return phi.to(self.device)
     
@@ -587,14 +532,14 @@ class ElectrodeSolver():
             cb = np.zeros([x, y, z])
             a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
             cb[(a + b + c) % 2 == 0] = 1*self.w
-            return [pt.roll(pt.tensor(cb), sh, 0).to(self.device) for sh in [0, 1]]
+            return [torch.roll(torch.tensor(cb), sh, 0).to(self.device) for sh in [0, 1]]
 
         elif len(img.shape)==3:
             bs, x, y = img.shape
             cb = np.zeros([x, y])
             a, b = np.meshgrid(range(x), range(y), indexing='ij')
             cb[(a + b) % 2 == 0] = 1*self.w
-            cb = [pt.roll(pt.tensor(cb).to(self.device), sh, 0) for sh in [0, 1]]
+            cb = [torch.roll(torch.tensor(cb).to(self.device), sh, 0) for sh in [0, 1]]
             cb[1][0] = cb[1][2]
             return cb
 
@@ -611,11 +556,11 @@ class ElectrodeSolver():
         dims = (len(img.shape)-1)*2
         # find number of conducting nearest neighbours
         img2 = self.pad(img, [1,0])
-        nn_cond = pt.zeros_like(img2, dtype=self.precision)
+        nn_cond = torch.zeros_like(img2, dtype=self.precision)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, len(img.shape)):
             for dr in [1, -1]:
-                nn_cond += pt.roll(img2, dr, dim)
+                nn_cond += torch.roll(img2, dr, dim)
         # remove the paddings
         nn_cond = self.crop(nn_cond, 1)
         self.nn = nn_cond
@@ -624,7 +569,7 @@ class ElectrodeSolver():
         omegapf = (orc**2 + 1j*orc)/(orc**2+1)
         prefactor = (nn_cond + 2*nn_solid*omegapf)**-1
         # prefactor = (nn_cond+2j*self.omega*self.res*self.c_DL*(dims-nn_cond))**-1
-        prefactor[prefactor==pt.inf] = 0
+        prefactor[prefactor==torch.inf] = 0
         prefactor[img==0] = 0
         return prefactor.to(self.device)
     
@@ -633,9 +578,9 @@ class ElectrodeSolver():
         for dim in range(1, len(self.phi.shape)):
             for dr in [1, -1]:
                 if i==0:
-                    out = pt.roll(self.phi, dr, dim)
+                    out = torch.roll(self.phi, dr, dim)
                 else:
-                    out += pt.roll(self.phi, dr, dim)
+                    out += torch.roll(self.phi, dr, dim)
                 i+=1
 
         out = self.crop(out, 1)
@@ -689,7 +634,7 @@ class ElectrodeSolver():
         """
         run a solve simulation
 
-        :param iter_limit: max iterations before aborting, will attempt double for the same no. iterations
+        :param iter_limit: max iterations before aborting, will attemtorch double for the same no. iterations
         if initialised as singles
         :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
         :param conv_crit: convergence criteria - running standard deviation of tau_e
@@ -733,8 +678,4 @@ class ElectrodeSolver():
         converged = 'converged to'
         if self.verbose:
             print(f'{converged}: {self.tau_e} after: {self.iter} iterations in: {np.around(timer() - self.start, 4)} seconds at a rate of {np.around((timer() - self.start)/self.iter, 4)} s/iter')
-
-
-
-
 
