@@ -36,7 +36,7 @@ def surface_area(img, phases, periodic=False):
     :return: the surface area in faces per unit volume
     """
     shape = img.shape
-    int_not_in_img = np.unique(img).min() -1
+    int_not_in_img = int(np.unique(img).max()+1)
 
     dim = len(shape)
     img = pt.tensor(img)
@@ -46,7 +46,7 @@ def surface_area(img, phases, periodic=False):
         periodic.reverse()
         pad = ()
         for x in periodic:
-            pad += tuple((int(not x),)*dim)
+            pad += tuple((int(not x),)*2)
         img = F.pad(img, pad, 'constant', value=int_not_in_img)
         periodic.reverse()
     else:
@@ -88,7 +88,7 @@ def surface_area(img, phases, periodic=False):
 def triple_phase_boundary(img):
     phases = pt.unique(pt.tensor(img))
     if len(phases)!=3:
-        return None
+        raise ValueError('Image must have exactly 3 phases')
     shape = img.shape
     dim = len(shape)
     ph_maps = []
