@@ -68,7 +68,7 @@ class Solver:
         """Sets an initial linear field across the volume"""
         bs, x, y, z = img.shape
         sh = 1 / (x * 2)
-        vec = torch.linspace(self.top_bc + sh, self.bot_bc - sh, x, dtype=self.precision)
+        vec = torch.linspace(self.top_bc + sh, self.bot_bc - sh, x, dtype=self.precision, device=self.device)
         for i in range(2):
             vec = torch.unsqueeze(vec, -1)
         vec = torch.unsqueeze(vec, 0)
@@ -484,12 +484,18 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
     
-    def __init__(self, img, omega=1e-6, device=torch.device('cuda:0')):
+    def __init__(self, img, omega=1e-6, device=torch.device('cuda')):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = torch.double
-        self.device = device
+        # check device is available
+        self.device = torch.device(device)
+        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
+            self.device = torch.device('cpu')
+            print('CUDA not available, defaulting device to cpu')
+        else:
+            print(f'Using device: {self.device}')
         # Define omega, res and c_DL
         self.omega = omega
         self.res = 1
@@ -567,7 +573,7 @@ class ElectrodeSolver():
         :return: phi
         :rtype: torch.array
         """
-        phi = torch.zeros_like(img, dtype=self.precision)+0j
+        phi = torch.zeros_like(img, dtype=self.precision, device=self.device)+0j
         phi = self.pad(phi, [1, 0])
         return phi.to(self.device)
     
