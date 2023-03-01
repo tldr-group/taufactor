@@ -9,7 +9,7 @@ class Solver:
     Default solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
     """
-    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda:0')):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda')):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -28,8 +28,14 @@ class Solver:
         self.cpu_img = img
         self.precision = torch.float
         self.device = device
+        # check device is available
+        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
+            self.device = torch.device('cpu')
+            print('CUDA not available, defaulting device to cpu')
+        else:
+            print(f'Using device: {self.device}')
         # save original image in cuda
-        img = torch.tensor(img, dtype=self.precision)
+        img = torch.tensor(img, dtype=self.precision, device=self.device)
         self.VF = torch.mean(img)
         if len(torch.unique(img).shape)>2 or torch.unique(img).max() not in [0,1] or torch.unique(img).min() not in [0,1]:
             raise ValueError(f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
