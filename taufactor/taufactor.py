@@ -2,7 +2,10 @@
 import numpy as np
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
-import torch
+try:
+    import torch
+except ImportError:
+    raise ImportError("Pytorch is required to use this package. Please install pytorch and try again. More information about TauFactor's requirements can be found at https://taufactor.readthedocs.io/en/latest/")
 import warnings
 
 class Solver:
