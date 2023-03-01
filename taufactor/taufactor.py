@@ -3,6 +3,7 @@ import numpy as np
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 import torch
+import warnings
 
 class Solver:
     """
@@ -31,9 +32,7 @@ class Solver:
         # check device is available
         if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
             self.device = torch.device('cpu')
-            print('CUDA not available, defaulting device to cpu')
-        else:
-            print(f'Using device: {self.device}')
+            warnings.warn("CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
         # save original image in cuda
         img = torch.tensor(img, dtype=self.precision, device=self.device)
         self.VF = torch.mean(img)
@@ -312,9 +311,7 @@ class MultiPhaseSolver(Solver):
         # check device is available
         if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
             self.device = torch.device('cpu')
-            print('CUDA not available, defaulting device to cpu')
-        else:
-            print(f'Using device: {self.device}')
+            warnings.warn("CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
         # save original image in cuda
         img = torch.tensor(img, dtype=self.precision, device=self.device)
         # self.VF = torch.mean(img)
@@ -493,9 +490,7 @@ class ElectrodeSolver():
         self.device = torch.device(device)
         if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
             self.device = torch.device('cpu')
-            print('CUDA not available, defaulting device to cpu')
-        else:
-            print(f'Using device: {self.device}')
+            warnings.warn("CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
         # Define omega, res and c_DL
         self.omega = omega
         self.res = 1
