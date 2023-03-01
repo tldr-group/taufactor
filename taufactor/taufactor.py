@@ -27,7 +27,7 @@ class Solver:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = torch.float
-        self.device = device
+        self.device = torch.device(device)
         # check device is available
         if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
             self.device = torch.device('cpu')
