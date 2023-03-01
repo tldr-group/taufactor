@@ -31,7 +31,7 @@ class Solver:
         # save original image in cuda
         img = torch.tensor(img, dtype=self.precision)
         self.VF = torch.mean(img)
-        if len(torch.unique(img).shape)>2 or torch.unique(img).max() != 1 or torch.unique(img).min() != 0:
+        if len(torch.unique(img).shape)>2 or torch.unique(img).max() not in [0,1] or torch.unique(img).min() not in [0,1]:
             raise ValueError(f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
 
         # calculate 
@@ -297,16 +297,50 @@ class MultiPhaseSolver(Solver):
         if 0 in cond.values():
             raise ValueError('0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
-        super().__init__(img, bc, device=device)
+        self.top_bc, self.bot_bc = bc
+        if len(img.shape) == 3:
+            img = np.expand_dims(img, 0)
+        self.cpu_img = img
+        self.precision = torch.float
+        self.device = device
+        # save original image in cuda
+        img = torch.tensor(img, dtype=self.precision)
+        # self.VF = torch.mean(img)
+        # if len(torch.unique(img).shape)>2 or torch.unique(img).max() not in [0,1] or torch.unique(img).min() not in [0,1]:
+        #     raise ValueError(f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
+
+        # calculate 
+        self.ph_bot = torch.sum(img[:, -1]).to(self.device) * self.bot_bc
+        self.ph_top = torch.sum(img[:, 0]).to(self.device) * self.top_bc
+        # init conc
+        self.conc = self.init_conc(img)
+        # create nn map
+        self.nn = self.init_nn(img)
+        # overrelaxation factor
+        self.w = 2 - torch.pi / (1.5 * img.shape[1])
+        # checkerboarding to ensure stable steps
+        self.cb = self.init_cb(img)
+        bs, x, y, z = self.cpu_img.shape
+        self.L_A = x / (z * y)
+        # solving params
+        self.converged = False
+        self.semi_converged = False
+        self.old_fl = -1
+        self.iter=0
+        # Results
+        self.tau=None
+        self.D_eff=None
+        
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
         self.semi_converged = False
         self.old_fl = -1
-        self.VF = {p:np.mean(img==p) for p in np.unique(img)}
+        self.VF = {p:np.mean(img.cpu().numpy()==p) for p in np.unique(img.cpu().numpy())}
         if len(np.array([self.VF[z] for z in self.VF.keys() if z!=0]))>0:
             self.D_mean=np.sum(np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z!=0]))
         else:
             self.D_mean=0
+
     def init_nn(self, img):
         #conductivity map
         img2 = torch.zeros_like(img)
@@ -347,7 +381,7 @@ class MultiPhaseSolver(Solver):
         vec = vec.repeat(bs, 1, y, z)
         vec = vec.to(self.device)
         # vec = vec.astype(self.precision)
-        img1 = torch.tensor(img).to(self.device)
+        img1 = img.clone().to(self.device)
         img1[img1 > 1] = 1
         return self.pad(img1 * vec, [self.top_bc, self.bot_bc])
 
