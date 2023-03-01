@@ -1,6 +1,17 @@
 # History
 
+## 1.0.0 ()
+
+---
+
+-   Migrated to PyTorch from CuPy
+-   New convergence criteria
+-   New documentation style
+-   CI testing
+
 ## 0.1.4 (2022-07-11)
+
+---
 
 -   Add TauE solver
 -   Add triple phase boundary calculations
