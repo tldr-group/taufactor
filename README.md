@@ -70,3 +70,7 @@ pytest
 ## Credits
 
 This package was created by the [tldr group](https://tldr-group.github.io/) at the Dyson School of Design Engineering, Imperial College London.
+
+## TauFactor MATLAB
+
+The package in this repository refers to a Python implementation of the TauFactor solver. There is a deprecated [MATLAB implementation](https://www.mathworks.com/matlabcentral/fileexchange/57956-taufactor), which is no longer maintained.
