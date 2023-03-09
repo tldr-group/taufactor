@@ -25,7 +25,7 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 
 ## Requirements
 
-Before installing taufactor, [download the most recent version of PyTorch](https://pytorch.org/get-started/locally/).
+Before installing taufactor, [download the most recent version of PyTorch](https://pytorch.org/get-started/locally/). Ensure you have `pytorch>=1.10` installed in your Python environment.
 
 ## Quickstart
 
@@ -39,7 +39,7 @@ To extract effective diffusivity and tortuosity factor from your data:
 
 ```python
 import taufactor as tau
-
+import tifffile
 # load image
 img = tifffile.imread('path/filename')
 # ensure 1s for conductive phase and 0s otherwise.
