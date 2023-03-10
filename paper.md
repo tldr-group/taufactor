@@ -31,7 +31,7 @@ bibliography: paper.bib
 TauFactor 2 is an open-source, GPU accelerated diffusion solver for the calculation of tortuosity factor. Tortuosity factor, $\tau$, is a material parameter that defines the reduction in diffusion transport arising from the curvature of flow paths through a pourous medium (see \autoref{example}). As shown in \autoref{eq:tort}, the effective diffusion co-efficient of a multiphase material, $D_{eff}$, can thus be calculated from the diffusive phases intrinsic diffusivity, $D$, and volume fraction, $\epsilon$ [@cooper2016taufactor]. Tortuosity factor has been a metric of interest in a broad range of fields for many of decades. In geophysics, $\tau$ influences groundwater flow through pourous rocks, which has significant environmental contamination impacts [@carey2016estimating]. Biomedical studies have used $\tau$ as a diagnostic indicator of disease through imaging of retinal blood vessels [@hart1999measurement]. Electrochemists use $\tau$ to solve a reduced-order system of equations describing the electrochemical behaviour of lithium-ion batteries, which influences a cells power rating [@landesfeind2018tortuosity]. The imaging and subsequent modeling of materials to determine $\tau$ is thus commonplace and crucial.
 
 \begin{equation}\label{eq:tort}
-D\_{eff} = D\dfrac{\epsilon}{\tau}
+D_{eff} = D\dfrac{\epsilon}{\tau}
 \end{equation}
 
 ![Microstructure and flux field of a sample from the microlib library [@kench2022microlib].\label{example}](example.pdf)
