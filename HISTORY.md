@@ -8,6 +8,7 @@
 -   New convergence criteria
 -   New documentation style
 -   CI testing
+-   Includes TauFactor paper
 
 ## 0.1.4 (2022-07-11)
 
