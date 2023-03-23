@@ -53,7 +53,7 @@ import tifffile
 # load segmented image
 img = tifffile.imread('path/filename')
 flux_direction(img)
-img = torch.permute(img, (1,2,0))
+img = torch.permute(torch.tensor(img), (1,2,0))
 s = tau.Solver(img)
 s.solve()
 ```
