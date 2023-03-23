@@ -27,6 +27,12 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 
 Before installing taufactor, [download the most recent version of PyTorch](https://pytorch.org/get-started/locally/). Ensure you have `pytorch>=1.10` installed in your Python environment.
 
+For example, for a Linux machine with CUDA GPU
+
+```
+conda install pytorch pytorch-cuda=11.7 -c pytorch -c nvidia
+```
+
 ## Quickstart
 
 To install TauFactor via PyPI
