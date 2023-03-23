@@ -9,6 +9,7 @@ except ImportError:
 import warnings
 
 
+
 class Solver:
     """
     Default solver for two phase images. Once solve method is
@@ -42,6 +43,7 @@ class Solver:
         # save original image in cuda
         img = torch.tensor(img, dtype=self.precision, device=self.device)
         self.VF = torch.mean(img)
+        
         if len(torch.unique(img).shape) > 2 or torch.unique(img).max() not in [0, 1] or torch.unique(img).min() not in [0, 1]:
             raise ValueError(
                 f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
@@ -172,7 +174,8 @@ class Solver:
             return True
 
         if verbose == 'per_iter':
-            print(self.iter, abs(err), self.tau)
+            print(
+                f'Iter: {self.iter}, conv error: {abs(err.item())}, tau: {self.tau.item()}')
 
         if self.semi_converged:
             self.converged = self.check_rolling_mean(conv_crit=1e-3)
@@ -312,18 +315,22 @@ class MultiPhaseSolver(Solver):
         for a 2 phase material, {1:0.543, 2: 0.420}, with 1s and 2s in the input img
         :param precision:  cp.single or cp.double
         :param bc: Upper and lower boundary conditions. Leave as default.
-        :param D_0: reference material diffusivity
         """
 
-        if 0 in cond.values():
+        if (0 in cond.values()):
             raise ValueError(
                 '0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
+        if (0 in cond.keys()):
+            raise ValueError(
+                '0 cannot be used as a conductive phase label, please use a positive integer and leave 0 for non-conductive phase')
+
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
         self.top_bc, self.bot_bc = bc
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = torch.float
+
         self.device = torch.device(device)
         # check device is available
         if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
@@ -332,9 +339,6 @@ class MultiPhaseSolver(Solver):
                 "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
         # save original image in cuda
         img = torch.tensor(img, dtype=self.precision, device=self.device)
-        # self.VF = torch.mean(img)
-        # if len(torch.unique(img).shape)>2 or torch.unique(img).max() not in [0,1] or torch.unique(img).min() not in [0,1]:
-        #     raise ValueError(f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
 
         # calculate
         self.ph_bot = torch.sum(img[:, -1]).to(self.device) * self.bot_bc
@@ -351,19 +355,17 @@ class MultiPhaseSolver(Solver):
         self.L_A = x / (z * y)
         # solving params
         self.converged = False
-        self.semi_converged = False
-        self.old_fl = -1
         self.iter = 0
         # Results
         self.tau = None
         self.D_eff = None
-
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
         self.semi_converged = False
         self.old_fl = -1
         self.VF = {p: np.mean(img.cpu().numpy() == p)
                    for p in np.unique(img.cpu().numpy())}
+
         if len(np.array([self.VF[z] for z in self.VF.keys() if z != 0])) > 0:
             self.D_mean = np.sum(
                 np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z != 0]))
@@ -459,7 +461,8 @@ class MultiPhaseSolver(Solver):
                 return True
 
             if verbose == 'per_iter':
-                print(self.iter, abs(err), self.tau)
+                print(
+                    f'Iter: {self.iter}, conv error: {abs(err.item())}, tau: {self.tau.item()}')
 
             if self.semi_converged:
                 self.converged = self.check_rolling_mean(conv_crit=1e-3)
@@ -490,7 +493,8 @@ class MultiPhaseSolver(Solver):
         vert_flux = (self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:,
                      :-2, 1:-1, 1:-1]) * self.pre_factors[1][:, :-2, 1:-1, 1:-1]
         vert_flux[self.nn == torch.inf] = 0
-        fl = torch.sum(vert_flux, (0, 2, 3))
+        fl = torch.sum(vert_flux, (0, 2, 3))[2:-2]
+        print(fl.argmin(), fl.argmax())
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if err < conv_crit or torch.isnan(err).item():
             return True, torch.mean(fl), err
