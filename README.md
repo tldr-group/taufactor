@@ -40,6 +40,7 @@ To extract effective diffusivity and tortuosity factor from your data:
 ```python
 import taufactor as tau
 import tifffile
+
 # load image
 img = tifffile.imread('path/filename')
 # ensure 1s for conductive phase and 0s otherwise.
@@ -52,10 +53,6 @@ s.solve()
 
 # view effective diffusivity and tau
 print(s.D_eff, s.tau)
-
-# plot steady state maps
-s.flux_map()
-s.conc_map()
 
 ```
 
