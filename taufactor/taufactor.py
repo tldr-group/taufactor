@@ -9,7 +9,6 @@ except ImportError:
 import warnings
 
 
-
 class Solver:
     """
     Default solver for two phase images. Once solve method is
@@ -43,7 +42,7 @@ class Solver:
         # save original image in cuda
         img = torch.tensor(img, dtype=self.precision, device=self.device)
         self.VF = torch.mean(img)
-        
+
         if len(torch.unique(img).shape) > 2 or torch.unique(img).max() not in [0, 1] or torch.unique(img).min() not in [0, 1]:
             raise ValueError(
                 f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
@@ -169,7 +168,8 @@ class Solver:
             conv_crit)
         self.D_rel = ((self.new_fl) * self.L_A /
                       abs(self.top_bc - self.bot_bc)).cpu()
-        self.tau = self.VF/self.D_rel if self.D_rel != 0 else torch.inf
+        self.tau = self.VF / \
+            self.D_rel if self.D_rel != 0 else torch.tensor(torch.inf)
         if self.semi_converged == 'zero_flux':
             return True
 
@@ -456,7 +456,8 @@ class MultiPhaseSolver(Solver):
                 conv_crit)
             b, x, y, z = self.cpu_img.shape
             self.D_eff = (self.new_fl*(x+1)/(y*z)).cpu()
-            self.tau = self.D_mean/self.D_eff if self.D_eff != 0 else torch.inf
+            self.tau = self.D_mean / \
+                self.D_eff if self.D_eff != 0 else torch.tensor(torch.inf)
             if self.semi_converged == 'zero_flux':
                 return True
 
