@@ -19,10 +19,17 @@ import tifffile
 # load segmented image
 img = tifffile.imread('path/filename')
 s = tau.Solver(img)
+s.solve()
 # tau
 s.tau
 # D_eff
 s.D_eff
+```
+
+The iteration limit, convergence criteria and verbosity of the solver can be adjusted. Setting `verbose='per_iter'` logs the output of the solver every 100 steps whilst solving. The `conv_crit` controls the value at which convergence is met.
+
+```python
+s.solve(verbose='per_iter', conv_crit='1e-5')
 ```
 
 ### Flux direction
@@ -48,6 +55,7 @@ img = tifffile.imread('path/filename')
 flux_direction(img)
 img = torch.permute(img, (1,2,0))
 s = tau.Solver(img)
+s.solve()
 ```
 
 ## Other Solvers
