@@ -4,6 +4,12 @@
 
 Before installing taufactor, [download the most recent version of PyTorch](https://pytorch.org/get-started/locally/). Your exact PyTorch configuration will depend on your operating system and GPU availability. Ensure your PyTorch version is `pytorch>=1.0`.
 
+For example, for a Linux machine with CUDA GPU
+
+```
+conda install pytorch pytorch-cuda=11.7 -c pytorch -c nvidia
+```
+
 ## Stable release
 
 To install TauFactor via PyPI

@@ -6,7 +6,7 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 -   Documentation: [https://taufactor.readthedocs.io](https://taufactor.readthedocs.io).
 
 <p align="center">
-<img src="https://tldr-group.github.io/static/media/tau_example.685a0640.png" alt="TauFactor" width="324" height="324">
+<img src="https://tldr-group.github.io/static/media/tau_example.2c29eaf9.png" alt="TauFactor" width="324" height="324">
 </p>
 <p align="center">
 <a href="https://pypi.python.org/pypi/taufactor">
@@ -26,6 +26,12 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 ## Requirements
 
 Before installing taufactor, [download the most recent version of PyTorch](https://pytorch.org/get-started/locally/). Ensure you have `pytorch>=1.10` installed in your Python environment.
+
+For example, for a Linux machine with CUDA GPU
+
+```
+conda install pytorch pytorch-cuda=11.7 -c pytorch -c nvidia
+```
 
 ## Quickstart
 

@@ -1,6 +1,6 @@
 # History
 
-## 1.0.0 ()
+## 1.0.0 (2023-03-23)
 
 ---
 
@@ -8,6 +8,7 @@
 -   New convergence criteria
 -   New documentation style
 -   CI testing
+-   Includes TauFactor paper
 
 ## 0.1.4 (2022-07-11)
 
