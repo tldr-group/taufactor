@@ -2,7 +2,12 @@
 import numpy as np
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
-import torch
+try:
+    import torch
+except ImportError:
+    raise ImportError("Pytorch is required to use this package. Please install pytorch and try again. More information about TauFactor's requirements can be found at https://taufactor.readthedocs.io/en/latest/")
+import warnings
+
 
 
 class Solver:
@@ -11,7 +16,7 @@ class Solver:
     called, tau, D_eff and D_rel are available as attributes.
     """
 
-    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda:0')):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda')):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -29,11 +34,17 @@ class Solver:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = torch.float
-        self.device = device
+        self.device = torch.device(device)
+        # check device is available
+        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
+            self.device = torch.device('cpu')
+            warnings.warn(
+                "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
         # save original image in cuda
-        img = torch.tensor(img, dtype=self.precision)
+        img = torch.tensor(img, dtype=self.precision, device=self.device)
         self.VF = torch.mean(img)
-        if len(torch.unique(img).shape) > 2 or torch.unique(img).max() != 1 or torch.unique(img).min() != 0:
+        
+        if len(torch.unique(img).shape) > 2 or torch.unique(img).max() not in [0, 1] or torch.unique(img).min() not in [0, 1]:
             raise ValueError(
                 f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
 
@@ -66,7 +77,7 @@ class Solver:
         bs, x, y, z = img.shape
         sh = 1 / (x * 2)
         vec = torch.linspace(self.top_bc + sh, self.bot_bc -
-                             sh, x, dtype=self.precision)
+                             sh, x, dtype=self.precision, device=self.device)
         for i in range(2):
             vec = torch.unsqueeze(vec, -1)
         vec = torch.unsqueeze(vec, 0)
@@ -312,14 +323,23 @@ class MultiPhaseSolver(Solver):
         if (0 in cond.keys()):
             raise ValueError(
                 '0 cannot be used as a conductive phase label, please use a positive integer and leave 0 for non-conductive phase')
+
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
         self.top_bc, self.bot_bc = bc
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = torch.float
-        self.device = device
-        img = torch.tensor(img, dtype=self.precision)
+
+        self.device = torch.device(device)
+        # check device is available
+        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
+            self.device = torch.device('cpu')
+            warnings.warn(
+                "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
+        # save original image in cuda
+        img = torch.tensor(img, dtype=self.precision, device=self.device)
+
         # calculate
         self.ph_bot = torch.sum(img[:, -1]).to(self.device) * self.bot_bc
         self.ph_top = torch.sum(img[:, 0]).to(self.device) * self.top_bc
@@ -339,14 +359,13 @@ class MultiPhaseSolver(Solver):
         # Results
         self.tau = None
         self.D_eff = None
-        self.D_mean = None
-
-        # save original image in cuda
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
         self.semi_converged = False
         self.old_fl = -1
-        self.VF = {p: np.mean((img == p).numpy()) for p in np.unique(img)}
+        self.VF = {p: np.mean(img.cpu().numpy() == p)
+                   for p in np.unique(img.cpu().numpy())}
+
         if len(np.array([self.VF[z] for z in self.VF.keys() if z != 0])) > 0:
             self.D_mean = np.sum(
                 np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z != 0]))
@@ -393,7 +412,7 @@ class MultiPhaseSolver(Solver):
         vec = vec.repeat(bs, 1, y, z)
         vec = vec.to(self.device)
         # vec = vec.astype(self.precision)
-        img1 = torch.tensor(img).to(self.device)
+        img1 = img.clone().to(self.device)
         img1[img1 > 1] = 1
         return self.pad(img1 * vec, [self.top_bc, self.bot_bc])
 
@@ -490,12 +509,17 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
 
-    def __init__(self, img, omega=1e-6, device=torch.device('cuda:0')):
+    def __init__(self, img, omega=1e-6, device=torch.device('cuda')):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = torch.double
-        self.device = device
+        # check device is available
+        self.device = torch.device(device)
+        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
+            self.device = torch.device('cpu')
+            warnings.warn(
+                "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
         # Define omega, res and c_DL
         self.omega = omega
         self.res = 1
@@ -571,7 +595,8 @@ class ElectrodeSolver():
         :return: phi
         :rtype: torch.array
         """
-        phi = torch.zeros_like(img, dtype=self.precision)+0j
+        phi = torch.zeros_like(img, dtype=self.precision,
+                               device=self.device)+0j
         phi = self.pad(phi, [1, 0])
         return phi.to(self.device)
 

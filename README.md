@@ -25,7 +25,7 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 
 ## Requirements
 
-Before installing taufactor, [download the most recent version of PyTorch](https://pytorch.org/get-started/locally/).
+Before installing taufactor, [download the most recent version of PyTorch](https://pytorch.org/get-started/locally/). Ensure you have `pytorch>=1.10` installed in your Python environment.
 
 ## Quickstart
 
@@ -67,3 +67,7 @@ pytest
 ## Credits
 
 This package was created by the [tldr group](https://tldr-group.github.io/) at the Dyson School of Design Engineering, Imperial College London.
+
+## TauFactor MATLAB
+
+The package in this repository refers to a Python implementation of the TauFactor solver. There is a deprecated [MATLAB implementation](https://www.mathworks.com/matlabcentral/fileexchange/57956-taufactor), which is no longer maintained.

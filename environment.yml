@@ -4,5 +4,5 @@ channels:
     - nvidia
 dependencies:
     - python=3.8
-    - pytorch
+    - pytorch>-1.10
     - pytorch-cuda=11.6
