@@ -6,7 +6,7 @@ TauFactor is an application for calculating tortuosity factors from tomographic 
 -   Documentation: [https://taufactor.readthedocs.io](https://taufactor.readthedocs.io).
 
 <p align="center">
-<img src="https://tldr-group.github.io/static/media/tau_example.685a0640.png" alt="TauFactor" width="324" height="324">
+<img src="https://tldr-group.github.io/static/media/tau_example.2c29eaf9.png" alt="TauFactor" width="324" height="324">
 </p>
 <p align="center">
 <a href="https://pypi.python.org/pypi/taufactor">
