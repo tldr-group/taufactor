@@ -1,5 +1,6 @@
 numpy
-cupy
+torch
 scipy
 matplotlib
-m2r2
+tifffile
+myst_parser

@@ -1,0 +1,10 @@
+name: taufactor
+channels:
+    - pytorch
+    - nvidia
+dependencies:
+    - pytorch
+    - pytorch-cuda=11.6
+    - tifffile
+    - matplotlib
+    - pytest
