@@ -28,7 +28,7 @@ bibliography: paper.bib
 \SetWatermarkText{}
 # Summary
 
-TauFactor 2 is an open-source, GPU accelerated microstructural analysis tool for extracting metrics from voxel based data, including transport metrics such as the touristy factor. Tortuosity factor, $\tau$, is a material parameter that defines the reduction in transport arising from the arrangement of the phases in a multiphase medium (see \autoref{example}. As shown in \autoref{eq:tort}, the effective transport co-efficient of a material, $D_{eff}$, can thus be calculated from the phases intrinsic transport coefficient, $D$, and volume fraction, $\epsilon$ [@cooper2016taufactor]. Note, this value of $\tau$ should not be squared [@tjaden2016origin].
+TauFactor 2 is an open-source, GPU accelerated microstructural analysis tool for extracting metrics from voxel based data, including transport properties such as the touristy factor. Tortuosity factor, $\tau$, is a material parameter that defines the reduction in transport arising from the arrangement of the phases in a multiphase medium (see \autoref{example}). As shown in \autoref{eq:tort}, the effective transport co-efficient of a material, $D_{eff}$, can be calculated from the phases intrinsic transport coefficient, $D$, volume fraction, $\epsilon$, and $\tau$ [@cooper2016taufactor]. Note, this value of $\tau$ should not be squared [@tjaden2016origin].
 
 \begin{equation}\label{eq:tort}
 D_{eff} = D\dfrac{\epsilon}{\tau}
