@@ -25,7 +25,6 @@ affiliations:
 date: 9 March 2023
 bibliography: paper.bib
 ---
-\SetWatermarkText{}
 # Summary
 
 TauFactor 2 is an open-source, GPU accelerated microstructural analysis tool for extracting metrics from voxel based data, including transport properties such as the touristy factor. Tortuosity factor, $\tau$, is a material parameter that defines the reduction in transport arising from the arrangement of the phases in a multiphase medium (see \autoref{example}). As shown in \autoref{eq:tort}, the effective transport co-efficient of a material, $D_{\text{eff}}$, can be calculated from the phases intrinsic transport coefficient, $D$, volume fraction, $\epsilon$, and $\tau$ [@cooper2016taufactor] (note, this value of $\tau$ should not be squared [@tjaden2016origin]).
