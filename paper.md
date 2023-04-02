@@ -20,7 +20,7 @@ authors:
       corresponding: true # (This is how to denote the corresponding author)
       affiliation: 1
 affiliations:
-    - name: Imperial College London, UK
+    - name: Imperial College London, United Kingdom
       index: 1
 date: 9 March 2023
 bibliography: paper.bib
