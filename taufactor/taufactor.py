@@ -495,7 +495,6 @@ class MultiPhaseSolver(Solver):
                      :-2, 1:-1, 1:-1]) * self.pre_factors[1][:, :-2, 1:-1, 1:-1]
         vert_flux[self.nn == torch.inf] = 0
         fl = torch.sum(vert_flux, (0, 2, 3))[2:-2]
-        print(fl.argmin(), fl.argmax())
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if err < conv_crit or torch.isnan(err).item():
             return True, torch.mean(fl), err
