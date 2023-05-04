@@ -144,7 +144,7 @@ def test_surface_area_on_uniform_block():
     """Run surface area on uniform block"""
     l = 20
     img = np.ones([l, l, l])
-    sa = surface_area(img, phases=1)
+    sa = surface_area(img, phases=[1])
 
     assert sa == 0
 
@@ -153,7 +153,7 @@ def test_surface_area_on_empty_block():
     """Run surface area on empty block"""
     l = 20
     img = np.zeros([l, l, l])
-    sa = surface_area(img, phases=0)
+    sa = surface_area(img, phases=[0])
 
     assert sa == 0
 

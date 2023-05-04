@@ -55,7 +55,7 @@ def surface_area(img, phases, periodic=False):
 
     SA_map = torch.zeros_like(img)
     if not isinstance(phases, list):
-        phases = [phases]
+        raise TypeError('phases should be a list')
     for i in range(dim):
         for j in [1, -1]:
             i_rolled = torch.roll(img, j, i)
