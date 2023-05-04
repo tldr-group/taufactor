@@ -86,6 +86,13 @@ def surface_area(img, phases, periodic=False):
     return sa
 
 def triple_phase_boundary(img):
+    """Calculate triple phase boundary density i.e. fraction of voxel verticies that touch at least 3 phases
+
+    Args:
+        img (numpy array): image to calculate metric on     
+    Returns:
+        float: triple phase boundary density 
+    """
     phases = torch.unique(torch.tensor(img))
     if len(phases)!=3:
         raise ValueError('Image must have exactly 3 phases')
