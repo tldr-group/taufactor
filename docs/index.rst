@@ -8,6 +8,7 @@ Welcome to TauFactor's documentation!
    readme
    installation
    usage
+   taufactor
    contributing
    authors
    history
