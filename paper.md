@@ -58,6 +58,10 @@ To compare the performance of TauFactor 2 to other available software, a test vo
 
 ![Speed comparison for the four solvers when applied to the test volume. The mean time across all 3 directions is plotted. The values of the overconverged $\tau$ in each direction are: 1.1513, 1.3905, 4.2431. \label{speeds}](tauspeeds.pdf)
 
+# Authorship Contributions
+
+SK wrote the base, periodic and multiphase solvers with input from IS. IS wrote the electrode solver, metric calculations and documentation, and also performed speed tests for other software packages. The project was supervised by SC, and based on his original MATLAB tool. All authors contributed to the writing and editing of the manuscript.
+
 # Acknowledgements
 
 This work was supported by funding from the EPSRC Faraday Institution Multi-Scale Modelling project
