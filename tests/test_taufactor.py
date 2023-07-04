@@ -84,7 +84,6 @@ def test_deadend():
     # solve for tau
     S = tau.Solver(solid)
     S.solve()
-    print(S.tau, S.converged)
     assert np.around(S.D_eff, decimals=5) == 0
     assert S.tau == np.inf
 

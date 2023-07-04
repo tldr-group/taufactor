@@ -18,6 +18,7 @@ authors:
       affiliation: 1
     - name: Samuel Cooper
       corresponding: true # (This is how to denote the corresponding author)
+      orcid: 0000-0003-4055-6903
       affiliation: 1
 affiliations:
     - name: Imperial College London, United Kingdom
