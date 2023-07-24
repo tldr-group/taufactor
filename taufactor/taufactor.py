@@ -21,7 +21,6 @@ class Solver:
         for multiple solves.
 
         :param img: input img with 1s conductive and 0s non-conductive
-        :param precision:  cp.single or cp.double
         :param bc: Upper and lower boundary conditions. Leave as default.
         :param D_0: reference material diffusivity
         :param device: pytorch device, can be cuda or cpu 
@@ -166,12 +165,16 @@ class Solver:
         # print progress
         self.semi_converged, self.new_fl, err = self.check_vertical_flux(
             conv_crit)
-        self.D_rel = ((self.new_fl) * self.L_A /
-                      abs(self.top_bc - self.bot_bc)).cpu()
-        self.tau = self.VF / \
-            self.D_rel if self.D_rel != 0 else torch.tensor(torch.inf)
         if self.semi_converged == 'zero_flux':
+            self.D_rel = 0
+            self.tau = np.inf
             return True
+        else:
+            self.D_rel = ((self.new_fl) * self.L_A /
+                        abs(self.top_bc - self.bot_bc)).cpu()
+            self.tau = self.VF / \
+                self.D_rel if self.D_rel != 0 else torch.tensor(torch.inf)
+        
 
         if verbose == 'per_iter':
             print(
@@ -196,10 +199,10 @@ class Solver:
         vert_flux[self.conc[:, 1:-1, 1:-1, 1:-1] == 0] = 0
         fl = torch.sum(vert_flux, (0, 2, 3))[1:-1]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
-        if err < conv_crit or torch.isnan(err).item():
-            return True, torch.mean(fl), err
         if fl.min() == 0:
             return 'zero_flux', torch.mean(fl), err
+        if err < conv_crit or torch.isnan(err).item():
+            return True, torch.mean(fl), err
         return False, torch.mean(fl), err
 
     def check_rolling_mean(self, conv_crit):
@@ -233,7 +236,6 @@ class PeriodicSolver(Solver):
         for multiple solves.
 
         :param img: input img with 1s conductive and 0s non-conductive
-        :param precision:  cp.single or cp.double
         :param bc: Upper and lower boundary conditions. Leave as default.
         :param D_0: reference material diffusivity
 
@@ -313,7 +315,6 @@ class MultiPhaseSolver(Solver):
         :param img: input img with n conductive phases labelled as integers, and 0s for non-conductive
         :param cond: dict with n phase labels as keys, and their corresponding conductivities as values e.g
         for a 2 phase material, {1:0.543, 2: 0.420}, with 1s and 2s in the input img
-        :param precision:  cp.single or cp.double
         :param bc: Upper and lower boundary conditions. Leave as default.
         """
 
@@ -495,7 +496,6 @@ class MultiPhaseSolver(Solver):
                      :-2, 1:-1, 1:-1]) * self.pre_factors[1][:, :-2, 1:-1, 1:-1]
         vert_flux[self.nn == torch.inf] = 0
         fl = torch.sum(vert_flux, (0, 2, 3))[2:-2]
-        print(fl.argmin(), fl.argmax())
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if err < conv_crit or torch.isnan(err).item():
             return True, torch.mean(fl), err
