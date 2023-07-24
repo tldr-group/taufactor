@@ -1,5 +1,14 @@
 # History
 
+## 1.1.0 (2023-07-24)
+
+---
+
+-   Added comments from reviewers
+-   Added examples to documentation
+-   Added API documentation
+-   Fix test times on comparison
+
 ## 1.0.0 (2023-03-23)
 
 ---
