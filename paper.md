@@ -18,16 +18,17 @@ authors:
       affiliation: 1
     - name: Samuel Cooper
       corresponding: true # (This is how to denote the corresponding author)
+      orcid: 0000-0003-4055-6903
       affiliation: 1
 affiliations:
-    - name: Imperial College London, UK
+    - name: Imperial College London, United Kingdom
       index: 1
 date: 9 March 2023
 bibliography: paper.bib
 ---
 # Summary
 
-TauFactor 2 is an open-source, GPU accelerated microstructural analysis tool for extracting metrics from voxel based data, including transport properties such as the touristy factor. Tortuosity factor, $\tau$, is a material parameter that defines the reduction in transport arising from the arrangement of the phases in a multiphase medium (see \autoref{example}). As shown in \autoref{eq:tort}, the effective transport co-efficient of a material, $D_{\text{eff}}$, can be calculated from the phases intrinsic transport coefficient, $D$, volume fraction, $\epsilon$, and $\tau$ [@cooper2016taufactor] (note, this value of $\tau$ should not be squared [@tjaden2016origin]).
+TauFactor 2 is an open-source, GPU accelerated microstructural analysis tool for extracting metrics from voxel based data, including transport properties such as the touristy factor. Tortuosity factor, $\tau$, is a material parameter that defines the reduction in transport arising from the arrangement of the phases in a multiphase medium (see \autoref{example}). As shown in \autoref{eq:tort}, the effective transport coefficient of a material, $D_{\text{eff}}$, can be calculated from the phases intrinsic transport coefficient, $D$, volume fraction, $\epsilon$, and $\tau$ [@cooper2016taufactor] (note, this value of $\tau$ should not be squared [@tjaden2016origin]).
 
 \begin{equation}\label{eq:tort}
 D_{\text{eff}} = D\dfrac{\epsilon}{\tau}
@@ -57,6 +58,10 @@ To compare the performance of TauFactor 2 to other available software, a test vo
 
 
 ![Speed comparison for the four solvers when applied to the test volume. The mean time across all 3 directions is plotted. The values of the overconverged $\tau$ in each direction are: 1.1513, 1.3905, 4.2431. \label{speeds}](tauspeeds.pdf)
+
+# Authorship Contributions
+
+SK wrote the base, periodic and multiphase solvers with input from IS. IS wrote the electrode solver, metric calculations and documentation, and also performed speed tests for other software packages. The project was supervised by SC, and based on his original MATLAB tool. All authors contributed to the writing and editing of the manuscript.
 
 # Acknowledgements
 

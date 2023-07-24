@@ -1,6 +1,6 @@
 # Using Taufactor
 
-This documentation covers the full usage of TauFactor
+This documentation covers the common usage of TauFactor. For a more detailed description see the [module API documentation](./taufactor.rst).
 
 ## Core solver
 
