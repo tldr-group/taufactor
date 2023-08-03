@@ -31,7 +31,7 @@ bibliography: paper.bib
 TauFactor 2 is an open-source, GPU accelerated microstructural analysis tool for extracting metrics from voxel based data, including transport properties such as the touristy factor. Tortuosity factor, $\tau$, is a material parameter that defines the reduction in transport arising from the arrangement of the phases in a multiphase medium (see \autoref{example}). As shown in \autoref{eq:tort}, the effective transport coefficient of a material, $D_{\text{eff}}$, can be calculated from the phases intrinsic transport coefficient, $D$, volume fraction, $\epsilon$, and $\tau$ [@cooper2016taufactor] (note, this value of $\tau$ should not be squared [@tjaden2016origin]).
 
 \begin{equation}\label{eq:tort}
-D_{\text{eff}} = D\dfrac{\epsilon}{\tau}
+D_{\text{eff}} = D\frac{\epsilon}{\tau}
 \end{equation}
 
 Tortuosity factor has been a metric of interest in a broad range of fields for many of decades. In geophysics, $\tau$ influences groundwater flow through pourous rocks, which has significant environmental contamination impacts [@carey2016estimating]. Electrochemists use $\tau$ to solve a reduced-order system of equations describing the electrochemical behaviour of lithium-ion batteries, which influences a cells power rating [@landesfeind2018tortuosity]. The imaging and subsequent modeling of materials to determine $\tau$ is thus commonplace.
@@ -49,7 +49,7 @@ TauFactor 1 [@cooper2016taufactor] provided an open-source MATLAB application fo
 The Python implementation is similar to the original TauFactor 1, taking advantage of efficiency gains such as the precalculation of prefactors and the use of over-relaxation. The same convergence criteria are also used, where the vertical flux between each layer is averaged across the planes parallel to the stimulated boundaries. If the percentage error between the minimum and maximum flux is below a given value (default 1\%), this indicates convergence has been reached. Once this is satsfied, an extra 100 iterations are performed to confirm the stability of the system. A notable difference in TauFactor 2 is that flux is calculated for all voxels. This replaces an indexing system in TauFactor 1, which solved only in active voxels. We find that the speed of GPU indexing compared to matrix multiplication makes this trade-off worthwhile. As well as the standard solver for a single transport phase, a multi-phase solver is available, where the tortuosity relates $D_{\text{eff}}$ to the intrinsic diffusion coefficients and volume fractions of the various phases, $p$, as follows:
 
 \begin{equation}\label{eq:mptort}
-D_{\text{eff}} = \dfrac{\sum_p{D_p \epsilon_p}}{\tau} = \dfrac{D_{\text{mean}}}{\tau} 
+D_{\text{eff}} = \frac{\sum_p{D_p \epsilon_p}}{\tau} = \frac{D_{\text{mean}}}{\tau} 
 \end{equation}
 
 $D_{\text{mean}}$ is a weighted sum of the active phase transport coefficients according to their volume fractions, which gives a transport coefficient equivalent to prismatic blocks of each phase spanning a test volume, in the direction of transport (i.e. perfectly straight transport paths). Periodic boundary conditions can also be used, which replace no-flux boundary conditions at the outer edges of the control volume. Finally, Taufactor 2 also includes an electrode tortuosity factor solver (see [@nguyen2020electrode]). There are also GPU accelerated functions for calculating volume fractions, surface areas, triple phase boundaries and the two-point correlation function. 
