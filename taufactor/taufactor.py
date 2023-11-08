@@ -149,9 +149,6 @@ class Solver:
                 out /= self.nn
                 # check convergence using criteria
                 if self.iter % 100 == 0:
-                    # plt.imshow(self.conc[0,0,3:-2,290:-2].cpu().numpy())
-                    # print('hello')
-                    # plt.show()
                     self.converged = self.check_convergence(
                         verbose, conv_crit, start, iter_limit)
                 # efficient way of adding flux to old conc with overrelaxation
