@@ -201,7 +201,7 @@ class Solver:
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if fl.min() == 0:
             return 'zero_flux', torch.mean(fl), err
-        if err < conv_crit or torch.isnan(err).item():
+        if abs(err) < conv_crit or torch.isnan(err).item():
             return True, torch.mean(fl), err
         return False, torch.mean(fl), err
 
