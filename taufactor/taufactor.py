@@ -162,6 +162,9 @@ class Solver:
             return self.tau
 
     def check_convergence(self, verbose, conv_crit, start, iter_limit):
+        # check iter limit
+        if self.iter >= iter_limit:
+            return True
         # print progress
         self.semi_converged, self.new_fl, err = self.check_vertical_flux(
             conv_crit)
