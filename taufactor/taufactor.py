@@ -137,7 +137,7 @@ class Solver:
 
         with torch.no_grad():
             start = timer()
-            while not self.converged:
+            while not self.converged and self.iter < iter_limit:
                 # find sum of all nearest neighbours
                 out = self.conc[:, 2:, 1:-1, 1:-1] + \
                     self.conc[:, :-2, 1:-1, 1:-1] + \
@@ -149,8 +149,7 @@ class Solver:
                 out /= self.nn
                 # check convergence using criteria
                 if self.iter % 100 == 0:
-                    self.converged = self.check_convergence(
-                        verbose, conv_crit, start, iter_limit)
+                    self.converged = self.check_convergence(verbose, conv_crit)
                 # efficient way of adding flux to old conc with overrelaxation
                 out -= self.crop(self.conc, 1)
                 out *= self.cb[self.iter % 2]
@@ -161,7 +160,7 @@ class Solver:
             self.end_simulation(iter_limit, verbose, start)
             return self.tau
 
-    def check_convergence(self, verbose, conv_crit, start, iter_limit):
+    def check_convergence(self, verbose, conv_crit):
         # print progress
         self.semi_converged, self.new_fl, err = self.check_vertical_flux(
             conv_crit)
