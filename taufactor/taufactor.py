@@ -197,7 +197,7 @@ class Solver:
         vert_flux[self.conc[:, :-2, 1:-1, 1:-1] == 0] = 0
         vert_flux[self.conc[:, 1:-1, 1:-1, 1:-1] == 0] = 0
         fl = torch.sum(vert_flux, (0, 2, 3))[1:-1]
-        err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
+        err = (fl.max() - fl.min())/(fl.max())
         if fl.min() == 0:
             return 'zero_flux', torch.mean(fl), err
         if err < conv_crit or torch.isnan(err).item():
