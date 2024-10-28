@@ -47,8 +47,7 @@ class Solver:
                 f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
 
         # calculate
-        self.ph_bot = torch.sum(img[:, -1]).to(self.device) * self.bot_bc
-        self.ph_top = torch.sum(img[:, 0]).to(self.device) * self.top_bc
+        
         # init conc
         self.conc = self.init_conc(img)
         # create nn map
@@ -350,8 +349,7 @@ class MultiPhaseSolver(Solver):
         img = torch.tensor(img, dtype=self.precision, device=self.device)
 
         # calculate
-        self.ph_bot = torch.sum(img[:, -1]).to(self.device) * self.bot_bc
-        self.ph_top = torch.sum(img[:, 0]).to(self.device) * self.top_bc
+        
         # init conc
         self.conc = self.init_conc(img)
         # create nn map
