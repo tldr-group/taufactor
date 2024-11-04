@@ -47,8 +47,7 @@ class Solver:
                 f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
 
         # calculate
-        self.ph_bot = torch.sum(img[:, -1]).to(self.device) * self.bot_bc
-        self.ph_top = torch.sum(img[:, 0]).to(self.device) * self.top_bc
+        
         # init conc
         self.conc = self.init_conc(img)
         # create nn map
@@ -137,7 +136,7 @@ class Solver:
 
         with torch.no_grad():
             start = timer()
-            while not self.converged:
+            while not self.converged and self.iter < iter_limit:
                 # find sum of all nearest neighbours
                 out = self.conc[:, 2:, 1:-1, 1:-1] + \
                     self.conc[:, :-2, 1:-1, 1:-1] + \
@@ -149,8 +148,7 @@ class Solver:
                 out /= self.nn
                 # check convergence using criteria
                 if self.iter % 100 == 0:
-                    self.converged = self.check_convergence(
-                        verbose, conv_crit, start, iter_limit)
+                    self.converged = self.check_convergence(verbose, conv_crit)
                 # efficient way of adding flux to old conc with overrelaxation
                 out -= self.crop(self.conc, 1)
                 out *= self.cb[self.iter % 2]
@@ -161,7 +159,7 @@ class Solver:
             self.end_simulation(iter_limit, verbose, start)
             return self.tau
 
-    def check_convergence(self, verbose, conv_crit, start, iter_limit):
+    def check_convergence(self, verbose, conv_crit):
         # print progress
         self.semi_converged, self.new_fl, err = self.check_vertical_flux(
             conv_crit)
@@ -192,13 +190,18 @@ class Solver:
             self.old_fl = self.new_fl
             return False
 
-    def check_vertical_flux(self, conv_crit):
+    def calc_vertical_flux(self):
+        '''Calculates the vertical flux through the volume'''
         vert_flux = self.conc[:, 1:-1, 1:-1, 1:-1] - \
             self.conc[:, :-2, 1:-1, 1:-1]
         vert_flux[self.conc[:, :-2, 1:-1, 1:-1] == 0] = 0
         vert_flux[self.conc[:, 1:-1, 1:-1, 1:-1] == 0] = 0
+        return vert_flux
+    
+    def check_vertical_flux(self, conv_crit):
+        vert_flux = self.calc_vertical_flux()
         fl = torch.sum(vert_flux, (0, 2, 3))[1:-1]
-        err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
+        err = (fl.max() - fl.min())/(fl.max())
         if fl.min() == 0:
             return 'zero_flux', torch.mean(fl), err
         if err < conv_crit or torch.isnan(err).item():
@@ -276,8 +279,7 @@ class PeriodicSolver(Solver):
             out = out[:, 2:-2]
             out /= self.nn
             if self.iter % 50 == 0:
-                self.converged = self.check_convergence(
-                    verbose, conv_crit, start, iter_limit)
+                self.converged = self.check_convergence(verbose, conv_crit)
             out -= self.conc[:, 2:-2]
             out *= self.cb[self.iter % 2]
             self.conc[:, 2:-2] += out
@@ -288,10 +290,15 @@ class PeriodicSolver(Solver):
         self.end_simulation(iter_limit, verbose, start)
         return self.tau
 
-    def check_vertical_flux(self, conv_crit):
+    def calc_vertical_flux(self):
+        '''Calculates the vertical flux through the volume'''
         vert_flux = abs(self.conc - torch.roll(self.conc, 1, 1))
         vert_flux[self.conc == 0] = 0
         vert_flux[torch.roll(self.conc, 1, 1) == 0] = 0
+        return vert_flux
+
+    def check_vertical_flux(self, conv_crit):
+        vert_flux = self.calc_vertical_flux()
         fl = torch.sum(vert_flux, (0, 2, 3))[3:-2]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if err < conv_crit or torch.isnan(err).item():
@@ -342,8 +349,7 @@ class MultiPhaseSolver(Solver):
         img = torch.tensor(img, dtype=self.precision, device=self.device)
 
         # calculate
-        self.ph_bot = torch.sum(img[:, -1]).to(self.device) * self.bot_bc
-        self.ph_top = torch.sum(img[:, 0]).to(self.device) * self.top_bc
+        
         # init conc
         self.conc = self.init_conc(img)
         # create nn map
@@ -441,8 +447,7 @@ class MultiPhaseSolver(Solver):
                 self.pre_factors[5][:, 1:-1, 1:-1, :-2]
             out /= self.nn
             if self.iter % 20 == 0:
-                self.converged = self.check_convergence(
-                    verbose, conv_crit, start, iter_limit)
+                self.converged = self.check_convergence(verbose, conv_crit)
             out -= self.crop(self.conc, 1)
             out *= self.cb[self.iter % 2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
@@ -450,7 +455,7 @@ class MultiPhaseSolver(Solver):
         self.end_simulation(iter_limit, verbose, start)
         return self.tau
 
-    def check_convergence(self, verbose, conv_crit, start, iter_limit):
+    def check_convergence(self, verbose, conv_crit):
         # print progress
         if self.iter % 100 == 0:
             self.semi_converged, self.new_fl, err = self.check_vertical_flux(
@@ -491,10 +496,15 @@ class MultiPhaseSolver(Solver):
 
         return False
 
-    def check_vertical_flux(self, conv_crit):
+    def calc_vertical_flux(self):
+        '''Calculates the vertical flux through the volume'''
         vert_flux = (self.conc[:, 1:-1, 1:-1, 1:-1] - self.conc[:,
                      :-2, 1:-1, 1:-1]) * self.pre_factors[1][:, :-2, 1:-1, 1:-1]
         vert_flux[self.nn == torch.inf] = 0
+        return vert_flux
+
+    def check_vertical_flux(self, conv_crit):
+        vert_flux = self.calc_vertical_flux()
         fl = torch.sum(vert_flux, (0, 2, 3))[2:-2]
         err = (fl.max() - fl.min())*2/(fl.max() + fl.min())
         if err < conv_crit or torch.isnan(err).item():
