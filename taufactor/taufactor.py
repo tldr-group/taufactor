@@ -397,7 +397,6 @@ class MultiPhaseSolver(BaseSolver):
         for a 2 phase material, {1:0.543, 2: 0.420}, with 1s and 2s in the input img
         :param bc: Upper and lower boundary conditions. Leave as default.
         """
-        super().__init__(img, bc, device)
         if (0 in cond.values()):
             raise ValueError(
                 '0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
@@ -408,6 +407,7 @@ class MultiPhaseSolver(BaseSolver):
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
 
         # Results
+        super().__init__(img, bc, device)
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
 
