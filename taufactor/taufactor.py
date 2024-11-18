@@ -52,6 +52,7 @@ class BaseSolver:
         # Results
         self.tau = None
         self.D_eff = None
+        img = None
 
     def init_cb(self, img):
         """Creates a chequerboard to ensure neighbouring pixels dont update,
@@ -131,12 +132,11 @@ class Solver(BaseSolver):
         super().__init__(img, bc, device)
         self.D_0 = D_0
         self.D_mean = None
-        self.VF = torch.mean(img)
+        self.VF = np.mean(img)
 
-        if len(torch.unique(img).shape) > 2 or torch.unique(img).max() not in [0, 1] or torch.unique(img).min() not in [0, 1]:
+        if len(np.unique(img).shape) > 2 or np.unique(img).max() not in [0, 1] or np.unique(img).min() not in [0, 1]:
             raise ValueError(
-                f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
-        img = None
+                f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {np.unique(img)}. If you have more than one conductive phase, use the multi-phase solver.')
 
     def init_conc(self, img):
         """Sets an initial linear field across the volume"""
@@ -241,6 +241,73 @@ class Solver(BaseSolver):
         return vert_flux
 
 
+class AnisotropicSolver(Solver):
+    """
+    Anisotropic Solver e.g. for FIB-SEM datsets where spacing in cutting direction it different from pixel resolution
+    """
+
+    def __init__(self, img, spacing, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda:0')):
+        if not isinstance(spacing, (list, tuple)) or len(spacing) != 3:
+            raise ValueError("spacing must be a list or tuple with three elements (dx, dy, dz)")
+        if not all(isinstance(x, (int, float)) for x in spacing):
+            raise ValueError("All elements in spacing must be integers or floats")
+        dx, dy, dz = spacing
+        self.Ky = (dx/dy)**2
+        self.Kz = (dx/dz)**2
+        super().__init__(img, bc, D_0, device)
+
+    def init_nn(self, img):
+        """Saves the number of conductive neighbours for flux calculation"""
+        img2 = self.pad(self.pad(img, [2, 2]))
+        nn = torch.zeros_like(img2, dtype=self.precision)
+        # iterate through shifts in the spatial dimensions
+        factor = [1.0, self.Ky, self.Kz]
+        for dim in range(1, 4):
+            for dr in [1, -1]:
+                nn += torch.roll(img2, dr, dim)*factor[dim-1]
+        # remove the two paddings
+        nn = self.crop(nn, 2)
+        # avoid div 0 errors
+        nn[img == 0] = torch.inf
+        nn[nn == 0] = torch.inf
+        print("lol rofl")
+        return nn.to(self.device)
+
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
+        """
+        run a solve simulation
+
+        :param iter_limit: max iterations before aborting, will attemtorch double for the same no. iterations
+        if initialised as singles
+        :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
+        :param conv_crit: convergence criteria, minimum percent difference between
+        max and min flux through a given layer
+        :return: tau
+        """
+
+        with torch.no_grad():
+            start = timer()
+            while not self.converged and self.iter < iter_limit:
+                # find sum of all nearest neighbours
+                out = self.conc[:, 2:, 1:-1, 1:-1] + self.conc[:, :-2, 1:-1, 1:-1] + \
+                      self.Ky*(self.conc[:, 1:-1, 2:, 1:-1] + self.conc[:, 1:-1, :-2, 1:-1]) + \
+                      self.Kz*(self.conc[:, 1:-1, 1:-1, 2:] + self.conc[:, 1:-1, 1:-1, :-2])
+                # divide by n conductive nearest neighbours to give flux
+                out /= self.nn
+                # check convergence using criteria
+                if self.iter % 100 == 0:
+                    self.converged = self.check_convergence(verbose, conv_crit)
+                # efficient way of adding flux to old conc with overrelaxation
+                out -= self.crop(self.conc, 1)
+                out *= self.cb[self.iter % 2]
+                self.conc[:, 1:-1, 1:-1, 1:-1] += out
+                self.iter += 1
+            self.D_mean = self.D_0
+            self.D_eff = self.D_mean*self.D_rel
+            self.end_simulation(iter_limit, verbose, start)
+            return self.tau
+
+
 class PeriodicSolver(Solver):
     """
     Periodic Solver (works for non-periodic structures, but has higher RAM requirements)
@@ -343,15 +410,14 @@ class MultiPhaseSolver(BaseSolver):
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
 
-        self.VF = {p: np.mean(img.cpu().numpy() == p)
-                   for p in np.unique(img.cpu().numpy())}
+        self.VF = {p: np.mean(img == p)
+                   for p in np.unique(img)}
 
         if len(np.array([self.VF[z] for z in self.VF.keys() if z != 0])) > 0:
             self.D_mean = np.sum(
                 np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z != 0]))
         else:
             self.D_mean = 0
-        img = None
 
     def init_conc(self, img):
         bs, x, y, z = img.shape
