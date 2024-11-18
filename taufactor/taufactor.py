@@ -251,6 +251,8 @@ class AnisotropicSolver(Solver):
             raise ValueError("spacing must be a list or tuple with three elements (dx, dy, dz)")
         if not all(isinstance(x, (int, float)) for x in spacing):
             raise ValueError("All elements in spacing must be integers or floats")
+        if (np.max(spacing)/np.min(spacing) > 10):
+            warnings.warn("This computation is very questionable for largely different spacings e.g. dz >> dx.")
         dx, dy, dz = spacing
         self.Ky = (dx/dy)**2
         self.Kz = (dx/dz)**2
@@ -270,7 +272,6 @@ class AnisotropicSolver(Solver):
         # avoid div 0 errors
         nn[img == 0] = torch.inf
         nn[nn == 0] = torch.inf
-        print("lol rofl")
         return nn.to(self.device)
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
