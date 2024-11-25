@@ -8,8 +8,112 @@ except ImportError:
     raise ImportError("Pytorch is required to use this package. Please install pytorch and try again. More information about TauFactor's requirements can be found at https://taufactor.readthedocs.io/en/latest/")
 import warnings
 
+class BaseSolver:
+    def __init__(self, img, bc=(-0.5, 0.5), device=torch.device('cuda')):
+        """
+        Base solver class to handle common functionality for different solvers.
+        Args:
+            img: labelled input image defining (non-)conducting phases.
+            bc: Boundary conditions applied at top and bottom of domain.
+            device: The device to perform computations ('cpu' or 'cuda').
+        """
+        self.top_bc, self.bot_bc = bc
+        if len(img.shape) == 3:
+            img = np.expand_dims(img, 0)
+        self.cpu_img = img
+        self.precision = torch.float
 
-class Solver:
+        self.device = torch.device(device)
+        # check device is available
+        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
+            self.device = torch.device('cpu')
+            warnings.warn(
+                "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
+        # save original image in cuda
+        img = torch.tensor(img, dtype=self.precision, device=self.device)
+
+        # init conc
+        self.conc = self.init_conc(img)
+        # create nn map
+        self.nn = self.init_nn(img)
+        # overrelaxation factor
+        self.w = 2 - torch.pi / (1.5 * img.shape[1])
+        # checkerboarding to ensure stable steps
+        self.cb = self.init_cb(img)
+        _, x, y, z = self.cpu_img.shape
+        self.L_A = x / (z * y)
+
+        # solving params
+        self.converged = False
+        self.semi_converged = False
+        self.old_fl = -1
+        self.iter = 0
+
+        # Results
+        self.tau = None
+        self.D_eff = None
+        img = None
+
+    def init_cb(self, img):
+        """Creates a chequerboard to ensure neighbouring pixels dont update,
+        which can cause instability"""
+        _, x, y, z = img.shape
+        cb = np.zeros([x, y, z])
+        a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
+        cb[(a + b + c) % 2 == 0] = 1
+        cb *= self.w
+        return [torch.roll(torch.tensor(cb, dtype=self.precision).to(self.device), sh, 0) for sh in [0, 1]]
+
+    def solve(self):
+        """Solve given PDE"""
+        raise NotImplementedError("You're trying to call the solve function on the generalized BaseSolver class")
+
+    def pad(self, img, vals=[0] * 6):
+        """Pads a volume with values"""
+        while len(vals) < 6:
+            vals.append(0)
+        to_pad = [1]*8
+        to_pad[-2:] = (0, 0)
+        img = torch.nn.functional.pad(img, to_pad, 'constant')
+        img[:, 0], img[:, -1] = vals[:2]
+        img[:, :, 0], img[:, :, -1] = vals[2:4]
+        img[:, :, :, 0], img[:, :, :, -1] = vals[4:]
+        return img
+
+    def crop(self, img, c=1):
+        """removes a layer from the volume edges"""
+        return img[:, c:-c, c:-c, c:-c]
+
+    def check_vertical_flux(self, conv_crit):
+        vert_flux = self.calc_vertical_flux()
+        fl = torch.sum(vert_flux, (0, 2, 3))
+        err = (fl.max() - fl.min())/(fl.max())
+        if fl.min() == 0:
+            return 'zero_flux', torch.mean(fl), err
+        if err < conv_crit or torch.isnan(err).item():
+            return True, torch.mean(fl), err
+        return False, torch.mean(fl), err
+
+    def check_rolling_mean(self, conv_crit):
+        err = (self.new_fl - self.old_fl) / (self.new_fl + self.old_fl)
+        if err < conv_crit:
+            return True
+        else:
+            return False
+
+    def end_simulation(self, iter_limit, verbose, start):
+        converged = 'converged to'
+        if self.iter >= iter_limit - 1:
+            print('Warning: not converged')
+            converged = 'unconverged value of tau'
+
+        if verbose:
+            print(f'{converged}: {self.tau} \
+                  after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
+                  seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
+
+
+class Solver(BaseSolver):
     """
     Default solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
@@ -25,47 +129,14 @@ class Solver:
         :param D_0: reference material diffusivity
         :param device: pytorch device, can be cuda or cpu 
         """
-        # add batch dim now for consistency
+        super().__init__(img, bc, device)
         self.D_0 = D_0
-        self.top_bc, self.bot_bc = bc
-        if len(img.shape) == 3:
-            img = np.expand_dims(img, 0)
-        self.cpu_img = img
-        self.precision = torch.float
-        self.device = torch.device(device)
-        # check device is available
-        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
-            self.device = torch.device('cpu')
-            warnings.warn(
-                "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
-        # save original image in cuda
-        img = torch.tensor(img, dtype=self.precision, device=self.device)
-        self.VF = torch.mean(img)
-
-        if len(torch.unique(img).shape) > 2 or torch.unique(img).max() not in [0, 1] or torch.unique(img).min() not in [0, 1]:
-            raise ValueError(
-                f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {torch.unique(img).numpy()}. If you have more than one conductive phase, use the multi-phase solver.')
-
-        # init conc
-        self.conc = self.init_conc(img)
-        # create nn map
-        self.nn = self.init_nn(img)
-        # overrelaxation factor
-        self.w = 2 - torch.pi / (1.5 * img.shape[1])
-        # checkerboarding to ensure stable steps
-        self.cb = self.init_cb(img)
-        bs, x, y, z = self.cpu_img.shape
-        self.L_A = x / (z * y)
-        # solving params
-        self.converged = False
-        self.semi_converged = False
-        self.old_fl = -1
-        self.iter = 0
-        img = None
-        # Results
-        self.tau = None
-        self.D_eff = None
         self.D_mean = None
+        self.VF = np.mean(img)
+
+        if len(np.unique(img).shape) > 2 or np.unique(img).max() not in [0, 1] or np.unique(img).min() not in [0, 1]:
+            raise ValueError(
+                f'Input image must only contain 0s and 1s. Your image must be segmented to use this tool. If your image has been segmented, ensure your labels are 0 for non-conductive and 1 for conductive phase. Your image has the following labels: {np.unique(img)}. If you have more than one conductive phase, use the multi-phase solver.')
 
     def init_conc(self, img):
         """Sets an initial linear field across the volume"""
@@ -93,32 +164,6 @@ class Solver:
         nn[img == 0] = torch.inf
         nn[nn == 0] = torch.inf
         return nn.to(self.device)
-
-    def init_cb(self, img):
-        """Creates a chequerboard to ensure neighbouring pixels dont update,
-        which can cause instability"""
-        bs, x, y, z = img.shape
-        cb = np.zeros([x, y, z])
-        a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
-        cb[(a + b + c) % 2 == 0] = 1
-        cb *= self.w
-        return [torch.roll(torch.tensor(cb, dtype=self.precision).to(self.device), sh, 0) for sh in [0, 1]]
-
-    def pad(self, img, vals=[0] * 6):
-        """Pads a volume with values"""
-        while len(vals) < 6:
-            vals.append(0)
-        to_pad = [1]*8
-        to_pad[-2:] = (0, 0)
-        img = torch.nn.functional.pad(img, to_pad, 'constant')
-        img[:, 0], img[:, -1] = vals[:2]
-        img[:, :, 0], img[:, :, -1] = vals[2:4]
-        img[:, :, :, 0], img[:, :, :, -1] = vals[4:]
-        return img
-
-    def crop(self, img, c=1):
-        """removes a layer from the volume edges"""
-        return img[:, c:-c, c:-c, c:-c]
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
         """
@@ -159,8 +204,7 @@ class Solver:
 
     def check_convergence(self, verbose, conv_crit):
         # print progress
-        self.semi_converged, self.new_fl, err = self.check_vertical_flux(
-            conv_crit)
+        self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
         if self.semi_converged == 'zero_flux':
             self.D_rel = 0
             self.tau = np.inf
@@ -196,33 +240,73 @@ class Solver:
         vert_flux[self.conc[:, 2:-1, 1:-1, 1:-1] == 0] = 0
         return vert_flux
 
-    def check_vertical_flux(self, conv_crit):
-        vert_flux = self.calc_vertical_flux()
-        fl = torch.sum(vert_flux, (0, 2, 3))
-        err = (fl.max() - fl.min())/(fl.max())
-        if fl.min() == 0:
-            return 'zero_flux', torch.mean(fl), err
-        if err < conv_crit or torch.isnan(err).item():
-            return True, torch.mean(fl), err
-        return False, torch.mean(fl), err
 
-    def check_rolling_mean(self, conv_crit):
-        err = (self.new_fl - self.old_fl) / (self.new_fl + self.old_fl)
-        if err < conv_crit:
-            return True
-        else:
-            return False
+class AnisotropicSolver(Solver):
+    """
+    Anisotropic Solver e.g. for FIB-SEM datsets where spacing in cutting direction it different from pixel resolution
+    """
 
-    def end_simulation(self, iter_limit, verbose, start):
-        converged = 'converged to'
-        if self.iter >= iter_limit - 1:
-            print('Warning: not converged')
-            converged = 'unconverged value of tau'
+    def __init__(self, img, spacing, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda:0')):
+        if not isinstance(spacing, (list, tuple)) or len(spacing) != 3:
+            raise ValueError("spacing must be a list or tuple with three elements (dx, dy, dz)")
+        if not all(isinstance(x, (int, float)) for x in spacing):
+            raise ValueError("All elements in spacing must be integers or floats")
+        if (np.max(spacing)/np.min(spacing) > 10):
+            warnings.warn("This computation is very questionable for largely different spacings e.g. dz >> dx.")
+        dx, dy, dz = spacing
+        self.Ky = (dx/dy)**2
+        self.Kz = (dx/dz)**2
+        super().__init__(img, bc, D_0, device)
 
-        if verbose:
-            print(f'{converged}: {self.tau} \
-                  after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
-                  seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
+    def init_nn(self, img):
+        """Saves the number of conductive neighbours for flux calculation"""
+        img2 = self.pad(self.pad(img, [2, 2]))
+        nn = torch.zeros_like(img2, dtype=self.precision)
+        # iterate through shifts in the spatial dimensions
+        factor = [1.0, self.Ky, self.Kz]
+        for dim in range(1, 4):
+            for dr in [1, -1]:
+                nn += torch.roll(img2, dr, dim)*factor[dim-1]
+        # remove the two paddings
+        nn = self.crop(nn, 2)
+        # avoid div 0 errors
+        nn[img == 0] = torch.inf
+        nn[nn == 0] = torch.inf
+        return nn.to(self.device)
+
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
+        """
+        run a solve simulation
+
+        :param iter_limit: max iterations before aborting, will attemtorch double for the same no. iterations
+        if initialised as singles
+        :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
+        :param conv_crit: convergence criteria, minimum percent difference between
+        max and min flux through a given layer
+        :return: tau
+        """
+
+        with torch.no_grad():
+            start = timer()
+            while not self.converged and self.iter < iter_limit:
+                # find sum of all nearest neighbours
+                out = self.conc[:, 2:, 1:-1, 1:-1] + self.conc[:, :-2, 1:-1, 1:-1] + \
+                      self.Ky*(self.conc[:, 1:-1, 2:, 1:-1] + self.conc[:, 1:-1, :-2, 1:-1]) + \
+                      self.Kz*(self.conc[:, 1:-1, 1:-1, 2:] + self.conc[:, 1:-1, 1:-1, :-2])
+                # divide by n conductive nearest neighbours to give flux
+                out /= self.nn
+                # check convergence using criteria
+                if self.iter % 100 == 0:
+                    self.converged = self.check_convergence(verbose, conv_crit)
+                # efficient way of adding flux to old conc with overrelaxation
+                out -= self.crop(self.conc, 1)
+                out *= self.cb[self.iter % 2]
+                self.conc[:, 1:-1, 1:-1, 1:-1] += out
+                self.iter += 1
+            self.D_mean = self.D_0
+            self.D_eff = self.D_mean*self.D_rel
+            self.end_simulation(iter_limit, verbose, start)
+            return self.tau
 
 
 class PeriodicSolver(Solver):
@@ -297,7 +381,7 @@ class PeriodicSolver(Solver):
         return vert_flux
 
 
-class MultiPhaseSolver(Solver):
+class MultiPhaseSolver(BaseSolver):
     """
     Multi=phase solver for two phase images. Once solve method is
     called, tau, D_eff and D_rel are available as attributes.
@@ -313,7 +397,6 @@ class MultiPhaseSolver(Solver):
         for a 2 phase material, {1:0.543, 2: 0.420}, with 1s and 2s in the input img
         :param bc: Upper and lower boundary conditions. Leave as default.
         """
-
         if (0 in cond.values()):
             raise ValueError(
                 '0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
@@ -322,49 +405,34 @@ class MultiPhaseSolver(Solver):
                 '0 cannot be used as a conductive phase label, please use a positive integer and leave 0 for non-conductive phase')
 
         self.cond = {ph: 0.5 / c for ph, c in cond.items()}
-        self.top_bc, self.bot_bc = bc
-        if len(img.shape) == 3:
-            img = np.expand_dims(img, 0)
-        self.cpu_img = img
-        self.precision = torch.float
 
-        self.device = torch.device(device)
-        # check device is available
-        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
-            self.device = torch.device('cpu')
-            warnings.warn(
-                "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
-        # save original image in cuda
-        img = torch.tensor(img, dtype=self.precision, device=self.device)
-
-        # init conc
-        self.conc = self.init_conc(img)
-        # create nn map
-        self.nn = self.init_nn(img)
-        # overrelaxation factor
-        self.w = 2 - torch.pi / (1.5 * img.shape[1])
-        # checkerboarding to ensure stable steps
-        self.cb = self.init_cb(img)
-        bs, x, y, z = self.cpu_img.shape
-        self.L_A = x / (z * y)
-        # solving params
-        self.converged = False
-        self.iter = 0
         # Results
-        self.tau = None
-        self.D_eff = None
+        super().__init__(img, bc, device)
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
-        self.semi_converged = False
-        self.old_fl = -1
-        self.VF = {p: np.mean(img.cpu().numpy() == p)
-                   for p in np.unique(img.cpu().numpy())}
+
+        self.VF = {p: np.mean(img == p)
+                   for p in np.unique(img)}
 
         if len(np.array([self.VF[z] for z in self.VF.keys() if z != 0])) > 0:
             self.D_mean = np.sum(
                 np.array([self.VF[z]*(1/(2*self.cond[z])) for z in self.VF.keys() if z != 0]))
         else:
             self.D_mean = 0
+
+    def init_conc(self, img):
+        bs, x, y, z = img.shape
+        sh = 1 / (x + 1)
+        vec = torch.linspace(self.top_bc + sh, self.bot_bc - sh, x)
+        for i in range(2):
+            vec = torch.unsqueeze(vec, -1)
+        vec = torch.unsqueeze(vec, 0)
+        vec = vec.repeat(bs, 1, y, z)
+        vec = vec.to(self.device)
+        # vec = vec.astype(self.precision)
+        img1 = img.clone().to(self.device)
+        img1[img1 > 1] = 1
+        return self.pad(img1 * vec, [self.top_bc, self.bot_bc])
 
     def init_nn(self, img):
         # conductivity map
@@ -395,20 +463,6 @@ class MultiPhaseSolver(Solver):
         nn[nn == 0] = torch.inf
         nn_list.insert(0, nn.to(self.device))
         return nn_list
-
-    def init_conc(self, img):
-        bs, x, y, z = img.shape
-        sh = 1 / (x + 1)
-        vec = torch.linspace(self.top_bc + sh, self.bot_bc - sh, x)
-        for i in range(2):
-            vec = torch.unsqueeze(vec, -1)
-        vec = torch.unsqueeze(vec, 0)
-        vec = vec.repeat(bs, 1, y, z)
-        vec = vec.to(self.device)
-        # vec = vec.astype(self.precision)
-        img1 = img.clone().to(self.device)
-        img1[img1 > 1] = 1
-        return self.pad(img1 * vec, [self.top_bc, self.bot_bc])
 
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
         """
@@ -445,9 +499,8 @@ class MultiPhaseSolver(Solver):
     def check_convergence(self, verbose, conv_crit):
         # print progress
         if self.iter % 100 == 0:
-            self.semi_converged, self.new_fl, err = self.check_vertical_flux(
-                conv_crit)
-            b, x, y, z = self.cpu_img.shape
+            self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
+            _, x, y, z = self.cpu_img.shape
             self.D_eff = (self.new_fl*(x+1)/(y*z)).cpu()
             self.tau = self.D_mean / \
                 self.D_eff if self.D_eff != 0 else torch.tensor(torch.inf)
