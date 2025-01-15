@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from scipy.ndimage import label, generate_binary_structure
+
 def volume_fraction(img, phases={}, device=torch.device('cuda')):
     """
     Calculates volume fractions of phases in an image
@@ -144,3 +146,122 @@ def triple_phase_boundary(img):
             tpb += torch.sum(tpb_map)
 
     return tpb/total_edges
+
+def label_periodic(field, grayscale_value, neighbour_structure, periodic, debug=False):
+    # Initialize phi field whith enlarged dimensions in periodic directions. Boundary values of
+    # array are copied into ghost cells which are necessary to impose boundary conditions.
+    padx = int(periodic[0])
+    pady = int(periodic[1])
+    padz = int(periodic[2])
+    mask = np.pad(field, ((padx, padx), (pady, pady), (padz, padz)), mode='wrap')
+    labeled_mask, num_labels = label(mask==grayscale_value, structure=neighbour_structure)
+    count = 1
+    for k in range(100):
+        # Find indices where labels are different at the boundaries and create swaplist
+        swap_list = np.zeros((1,2))
+        if periodic[0]:
+            # right x
+            indices = np.where((labeled_mask[0,:,:]!=labeled_mask[-2,:,:]) & (labeled_mask[0,:,:]!=0) & (labeled_mask[-2,:,:]!=0))
+            additional_swaps = np.column_stack((labeled_mask[0,:,:][indices], labeled_mask[-2,:,:][indices]))
+            swap_list = np.row_stack((swap_list,additional_swaps))
+            # left x
+            indices = np.where((labeled_mask[1,:,:]!=labeled_mask[-1,:,:]) & (labeled_mask[1,:,:]!=0) & (labeled_mask[-1,:,:]!=0))
+            additional_swaps = np.column_stack((labeled_mask[1,:,:][indices], labeled_mask[-1,:,:][indices]))
+            swap_list = np.row_stack((swap_list,additional_swaps))
+        if periodic[1]:
+            # top y
+            indices = np.where((labeled_mask[:,0,:]!=labeled_mask[:,-2,:]) & (labeled_mask[:,0,:]!=0) & (labeled_mask[:,-2,:]!=0))
+            additional_swaps = np.column_stack((labeled_mask[:,0,:][indices], labeled_mask[:,-2,:][indices]))
+            swap_list = np.row_stack((swap_list,additional_swaps))
+            # bottom y
+            indices = np.where((labeled_mask[:,1,:]!=labeled_mask[:,-1,:]) & (labeled_mask[:,1,:]!=0) & (labeled_mask[:,-1,:]!=0))
+            additional_swaps = np.column_stack((labeled_mask[:,1,:][indices], labeled_mask[:,-1,:][indices]))
+            swap_list = np.row_stack((swap_list,additional_swaps))
+        if periodic[2]:
+            # front z
+            indices = np.where((labeled_mask[:,:,0]!=labeled_mask[:,:,-2]) & (labeled_mask[:,:,0]!=0) & (labeled_mask[:,:,-2]!=0))
+            additional_swaps = np.column_stack((labeled_mask[:,:,0][indices], labeled_mask[:,:,-2][indices]))
+            swap_list = np.row_stack((swap_list,additional_swaps))
+            # back z
+            indices = np.where((labeled_mask[:,:,1]!=labeled_mask[:,:,-1]) & (labeled_mask[:,:,1]!=0) & (labeled_mask[:,:,-1]!=0))
+            additional_swaps = np.column_stack((labeled_mask[:,:,1][indices], labeled_mask[:,:,-1][indices]))
+            swap_list = np.row_stack((swap_list,additional_swaps))
+        swap_list = swap_list[1:,:]
+        # Sort swap list columns to ensure consistent ordering
+        swap_list = np.sort(swap_list, axis=1)
+
+        # Remove duplicates from swap_list
+        swap_list = np.unique(swap_list, axis=0)
+        # print(f"swap_list contains {swap_list.shape[0]} elements.")
+        if (swap_list.shape[0]==0):
+            break
+        for i in range(swap_list.shape[0]):
+            index = swap_list.shape[0] - i -1
+            labeled_mask[labeled_mask == swap_list[index][1]] = swap_list[index][0]
+        count += 1
+    if(debug):
+        print(f"Did {count} iterations for periodic labelling.")
+    dim = labeled_mask.shape
+    return labeled_mask[padx:dim[0]-padx,pady:dim[1]-pady,padz:dim[2]-padz], np.unique(labeled_mask).size-1
+
+def find_spanning_labels(labelled_array, axis):
+    """
+    Find labels that appear on both ends along given axis
+
+    Returns:
+        set: Labels that appear on both ends of the first axis.
+    """
+    if axis == "x":
+        front = np.s_[0,:,:]
+        end   = np.s_[-1,:,:]
+    elif axis == "y":
+        front = np.s_[:,0,:]
+        end   = np.s_[:,-1,:]
+    elif axis == "z":
+        front = np.s_[:,:,0]
+        end   = np.s_[:,:,-1]
+    else:
+        raise ValueError("Axis should be x, y or z!")
+
+    first_slice_labels = np.unique(labelled_array[front])
+    last_slice_labels = np.unique(labelled_array[end])
+    spanning_labels = set(first_slice_labels) & set(last_slice_labels)
+    spanning_labels.discard(0)  # Remove the background label if it exists
+    return spanning_labels
+
+def extract_through_feature(array, grayscale_value, axis, periodic=[False,False,False], connectivity=1, debug=False):
+    if array.ndim != 3:
+        print(f"Expected a 3D array, but got an array with {array.ndim} dimension(s).")
+        return None
+
+    # Compute volume fraction of given grayscale value
+    vol_phase = volume_fraction(array, phases={'1': grayscale_value})['1']
+
+    # Define a list of connectivities to loop over
+    connectivities_to_loop_over = [connectivity] if connectivity else range(1, 4)
+    through_feature = []
+    through_feature_fraction = np.zeros(len(connectivities_to_loop_over))
+
+    # Compute the largest interconnected features depending on given connectivity
+    count = 0
+    for conn in connectivities_to_loop_over:
+        # connectivity 1 = cells connected by sides (6 neighbours)
+        # connectivity 2 = cells connected by sides & edges (14 neighbours)
+        # connectivity 3 = cells connected by sides & edges & corners (26 neighbours)
+        neighbour_structure = generate_binary_structure(3,conn)
+        # Label connected components in the mask with given neighbour structure
+        if any(periodic):
+            labeled_mask, num_labels = label_periodic(array, grayscale_value, neighbour_structure, periodic, debug=debug)
+        else:
+            labeled_mask, num_labels = label(array == grayscale_value, structure=neighbour_structure)
+        if(debug):
+            print(f"Found {num_labels} labelled regions. For connectivity {conn} and grayscale {grayscale_value}.")
+
+        through_labels = find_spanning_labels(labeled_mask,axis)
+        spanning_network = np.isin(labeled_mask, list(through_labels))
+
+        through_feature.append(spanning_network)
+        through_feature_fraction[count] = volume_fraction(spanning_network, phases={'1': 1})['1']/vol_phase
+        count += 1
+
+    return through_feature, through_feature_fraction
