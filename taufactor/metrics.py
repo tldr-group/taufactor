@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-def volume_fraction(img, phases={}):
+def volume_fraction(img, phases={}, device=torch.device('cuda')):
     """
     Calculates volume fractions of phases in an image
     :param img: segmented input image with n phases
@@ -11,15 +11,17 @@ def volume_fraction(img, phases={}):
     """
 
     if type(img) is not type(torch.tensor(1)):
-        img = torch.tensor(img)
+        img = torch.tensor(img, device=device)
 
     if phases=={}:
-        phases = torch.unique(img)
-        vf_out = []
-        for p in phases:
-            vf_out.append((img==p).to(torch.float).mean().item())
-        if len(vf_out)==1:
-            vf_out=vf_out[0]
+        volume = torch.numel(img)
+        labels, counts = torch.unique(img, return_counts=True)
+        labels = labels.int()
+        counts = counts.float()
+        counts /= volume
+        vf_out = {}
+        for i, label in enumerate(labels):
+            vf_out[str(label.item())] = counts[i].item()
     else:
         vf_out={}
         for p in phases:
