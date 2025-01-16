@@ -236,6 +236,8 @@ def extract_through_feature(array, grayscale_value, axis, periodic=[False,False,
 
     # Compute volume fraction of given grayscale value
     vol_phase = volume_fraction(array, phases={'1': grayscale_value})['1']
+    if vol_phase == 0:
+        return 0, 0
 
     # Define a list of connectivities to loop over
     connectivities_to_loop_over = [connectivity] if connectivity else range(1, 4)

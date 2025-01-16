@@ -145,7 +145,7 @@ def test_volume_fraction_on_checkerboard():
     img = generate_checkerboard(l)
     vf = volume_fraction(img, phases={'zeros': 0, 'ones': 1})
 
-    assert (vf['zeros'], vf['ones']) == [0.5, 0.5]
+    assert (vf['zeros'], vf['ones']) == (0.5, 0.5)
 
 
 def test_volume_fraction_on_strip_of_ones():
