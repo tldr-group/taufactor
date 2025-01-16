@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from scipy.ndimage import label, generate_binary_structure
 
-def volume_fraction(img, phases={}, device=torch.device('cuda')):
+def volume_fraction(img, phases={}):
     """
     Calculates volume fractions of phases in an image
     :param img: segmented input image with n phases
@@ -13,7 +13,7 @@ def volume_fraction(img, phases={}, device=torch.device('cuda')):
     """
 
     if type(img) is not type(torch.tensor(1)):
-        img = torch.tensor(img, device=device)
+        img = torch.tensor(img)
 
     if phases=={}:
         volume = torch.numel(img)
