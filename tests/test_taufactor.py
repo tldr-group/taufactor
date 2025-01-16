@@ -125,7 +125,7 @@ def test_volume_fraction_on_uniform_block():
     """Run volume fraction on uniform block"""
     l = 20
     img = np.ones([l, l, l]).reshape(1, l, l, l)
-    vf = volume_fraction(img)
+    vf = volume_fraction(img)['1']
 
     assert np.around(vf, decimals=5) == 1.0
 
@@ -134,7 +134,7 @@ def test_volume_fraction_on_empty_block():
     """Run volume fraction on empty block"""
     l = 20
     img = np.zeros([l, l, l]).reshape(1, l, l, l)
-    vf = volume_fraction(img)
+    vf = volume_fraction(img)['0']
 
     assert np.around(vf, decimals=5) == 1.0
 
@@ -143,9 +143,9 @@ def test_volume_fraction_on_checkerboard():
     """Run volume fraction on checkerboard block"""
     l = 20
     img = generate_checkerboard(l)
-    vf = volume_fraction(img)
+    vf = volume_fraction(img, phases={'zeros': 0, 'ones': 1})
 
-    assert vf == [0.5, 0.5]
+    assert (vf['zeros'], vf['ones']) == [0.5, 0.5]
 
 
 def test_volume_fraction_on_strip_of_ones():
