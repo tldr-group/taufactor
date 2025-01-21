@@ -1,8 +1,10 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+import warnings
 
-from scipy.ndimage import label, generate_binary_structure
+from scipy.ndimage import label, generate_binary_structure, convolve
+from skimage import measure
 
 def volume_fraction(img, phases={}):
     """
@@ -31,69 +33,165 @@ def volume_fraction(img, phases={}):
 
     return vf_out
 
-def surface_area(img, phases, periodic=False):
-    """
-    Calculate interfacial surface area between two phases or the total surface area of one phase
-    :param img:
-    :param phases: list of phases to calculate SA, if lenght 1 calculate total SA, if length 2 calculate inerfacial SA
-    :param periodic: list of bools indicating if the image is periodic in each dimension
-    :return: the surface area in faces per unit volume
-    """
-    shape = img.shape
-    int_not_in_img = int(np.unique(img).max()+1)
+def crop_area_of_interest_torch(tensor, labels):
+    indices = torch.nonzero(torch.isin(tensor, labels), as_tuple=True)
+    min_idx = [torch.min(idx).item() for idx in indices]
+    max_idx = [torch.max(idx).item() for idx in indices]
 
-    dim = len(shape)
-    img = torch.tensor(img)
-    # finding an int that is not in the img for padding:
-    
-    if periodic:
-        periodic.reverse()
-        pad = ()
-        for x in periodic:
-            pad += tuple((int(not x),)*2)
-        img = F.pad(img, pad, 'constant', value=int_not_in_img)
-        periodic.reverse()
-    else:
-        img = F.pad(img, (1,)*dim*2, 'constant', value=int_not_in_img)
-        periodic=[0]*dim
+    # Slice the tensor to the bounding box
+    # Make sure to stay inside the bounds of total array
+    sub_tensor = tensor[max(min_idx[0]-3,0):min(max_idx[0]+4,tensor.shape[0]),
+                        max(min_idx[1]-3,0):min(max_idx[1]+4,tensor.shape[1]),
+                        max(min_idx[2]-3,0):min(max_idx[2]+4,tensor.shape[2])]
+    return sub_tensor
 
-    SA_map = torch.zeros_like(img)
-    if not isinstance(phases, list):
-        raise TypeError('phases should be a list')
-    for i in range(dim):
-        for j in [1, -1]:
-            i_rolled = torch.roll(img, j, i)
-            if len(phases)==2:
-                SA_map[(i_rolled == phases[0]) & (img == phases[1])] += 1
+def crop_area_of_interest_numpy(array, labels):
+    indices = np.nonzero(np.isin(array, labels))
+    min_idx = [np.min(idx) for idx in indices]
+    max_idx = [np.max(idx) for idx in indices]
+
+    # Slice the array to the bounding box
+    # Make sure to stay inside the bounds of the total array
+    sub_array = array[max(min_idx[0]-3, 0):min(max_idx[0]+4, array.shape[0]),
+                      max(min_idx[1]-3, 0):min(max_idx[1]+4, array.shape[1]),
+                      max(min_idx[2]-3, 0):min(max_idx[2]+4, array.shape[2])]
+    return sub_array
+
+def gaussian_kernel_3d_torch(size=3, sigma=1.0, device=torch.device('cuda')):
+    """Creates a 3D Gaussian kernel using PyTorch"""
+    ax = torch.linspace(-(size // 2), size // 2, size)
+    xx, yy, zz = torch.meshgrid(ax, ax, ax, indexing="ij")
+
+    # Calculate Gaussian function for each point in the grid
+    kernel = torch.exp(-(xx**2 + yy**2 + zz**2) / (2 * sigma**2))
+    kernel /= kernel.sum()
+    kernel = kernel.to(device)
+    return kernel.unsqueeze(0).unsqueeze(0)
+
+def gaussian_kernel_3d_numpy(size=3, sigma=1.0):
+    """Creates a 3D Gaussian kernel using NumPy"""
+    ax = np.linspace(-(size // 2), size // 2, size)
+    xx, yy, zz = np.meshgrid(ax, ax, ax)
+
+    # Calculate Gaussian function for each point in the grid
+    kernel = np.exp(-(xx**2 + yy**2 + zz**2) / (2 * sigma**2))
+    kernel /= np.sum(kernel)
+    return kernel
+
+def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', device=torch.device('cuda'), smoothing=True):
+    """
+    Calculate the specific surface area of all (specified) phases
+    :param img: labelled microstructure where each integer value represents a phase
+    :param spacing: voxel size in each dimension [dx,dy,dz]
+    :param phases: dictionary of phases {'name': label, ...}. If empty do all by default.
+    :param method: string to indicate preferred method (face_counting, marching_cubes or gradient)
+    :return: the surface area per unit volume
+    """
+    [dx,dy,dz] = spacing
+    surface_areas = {}
+
+    if (method == 'gradient') | (method == 'face_counting'):
+        if type(img) is not type(torch.tensor(1)):
+            tensor = torch.tensor(img)
+        else:
+            tensor = img
+        tensor = tensor.to(device)
+
+    if method == 'gradient':
+        if phases=={}:
+            labels = torch.unique(tensor)
+            labels = labels.int()
+            phases = {str(label.item()): label.item() for label in labels}
+        gaussian = gaussian_kernel_3d_torch(device=device)
+
+        volume = torch.numel(tensor)
+        for name, label in phases.items():
+            sub_tensor = crop_area_of_interest_torch(tensor, label)
+            # Create binary mask for the label within the slice
+            mask = (sub_tensor == label).float()
+            if smoothing:
+                mask = mask.unsqueeze(0).unsqueeze(0)
+                mask = F.pad(mask, (1,1,1,1,1,1), mode='reflect')
+                mask = F.conv3d(mask, gaussian, padding='valid')
+                mask = mask.squeeze()
+
+            grad = torch.gradient(mask, spacing=(dx,dy,dz))
+            norm2 = grad[0].pow(2) + grad[1].pow(2) + grad[2].pow(2)
+            surface_area = torch.sum(torch.sqrt(norm2)).item()
+
+            surface_areas[name] = surface_area / volume
+
+    elif method == 'face_counting':
+        # TODO: treat dimensions such that dx!=dz is accounted for
+        tensor = tensor.to(torch.int32)
+        if len(torch.unique(tensor)) == 1:
+            surface_areas = {str(tensor[0,0,0].int().item()): 0.0}
+        else:
+            volume = torch.numel(tensor)*dx
+            phasepairs = torch.tensor([[0,0]], device=device)
+
+            neighbour_idx = torch.nonzero(tensor[:-1,:,:] != tensor[1:,:,:], as_tuple=True)
+            neighbour_list = torch.stack([tensor[:-1,:,:][neighbour_idx], tensor[1:,:,:][neighbour_idx]])
+            phasepairs = torch.cat((phasepairs,torch.transpose(neighbour_list,0,1)), 0)
+            neighbour_idx = torch.nonzero(tensor[:,:-1,:] != tensor[:,1:,:], as_tuple=True)
+            neighbour_list = torch.stack([tensor[:,:-1,:][neighbour_idx], tensor[:,1:,:][neighbour_idx]])
+            phasepairs = torch.cat((phasepairs,torch.transpose(neighbour_list,0,1)), 0)
+            neighbour_idx = torch.nonzero(tensor[:,:,:-1] != tensor[:,:,1:], as_tuple=True)
+            neighbour_list = torch.stack([tensor[:,:,:-1][neighbour_idx], tensor[:,:,1:][neighbour_idx]])
+            phasepairs = torch.cat((phasepairs,torch.transpose(neighbour_list,0,1)), 0)
+
+            # Crop initial dummy values
+            phasepairs = phasepairs[1:]
+
+            if phases=={}:
+                if phasepairs == {}:
+                    surface_areas
+                labels, counts = torch.unique(phasepairs, return_counts=True)
+                labels = labels.int()
+                counts = counts.float()
+                counts /= volume
+                surface_areas = {str(label.item()): counts[i].item() for i, label in enumerate(labels)}
             else:
-                SA_map[(i_rolled == phases[0]) & (img != phases[0])] += 1
-    # remove padding
-    if not periodic[0]:
-        SA_map = SA_map[1:-1, :]
-    if not periodic[1]:
-        SA_map = SA_map[:, 1:-1]
-    x, y = shape[0], shape[1]
-    # scale factor calculated by taking into account edges
-    periodic_mask=[not x for x in periodic]
-    if dim == 3:
-        z = shape[2]
-        if not periodic[2]:
-            SA_map = SA_map[:, :, 1:-1]
-        sf = torch.sum(torch.tensor([x,y,z])[periodic_mask]*torch.roll(torch.tensor([x,y,z])[periodic_mask],1))
-        total_faces = 3*(x*y*z)-sf
-    elif dim == 2:
-        sf = torch.sum(torch.tensor([x,y])[periodic_mask])
-        total_faces = 2*(x+1)*(y+1)-(x+1)-(y+1)-2*sf
+                for name, label in phases.items():
+                    count = torch.sum((phasepairs == label).int()).item()
+                    surface_areas[name] = count / volume
+
+    elif method == 'marching_cubes':
+        if device != 'cpu':
+            warnings.warn("The marching cubes algorithm is performed on the CPU based on scikit-image package.")
+        if dx != dy | dx!= dz | dy!=dz:
+            raise ValueError("Surface area computation based on marching cubes assumes dx=dy=dz.")
+
+        if type(img) is type(torch.tensor(1)):
+            array = np.array(img.cpu())
+        else:
+            array = img
+
+        if phases=={}:
+            labels = np.unique(array).astype(int)
+            phases = {str(label): label for label in labels}
+
+        volume = array.size*dx
+        gaussian = gaussian_kernel_3d_numpy(size=3, sigma=1.0)
+        for name, label in phases.items():
+            sub_array = crop_area_of_interest_numpy(array, label)
+            sub_array = (sub_array == label).astype(float)
+            if smoothing:
+                sub_array = convolve(sub_array, gaussian, mode='nearest')
+            vertices, faces, _, _ = measure.marching_cubes(sub_array, 0.5, method='lewiner')
+            surface_area = measure.mesh_surface_area(vertices, faces)
+            surface_areas[name] = surface_area/volume
+
     else:
-        total_faces=SA_map.size
-    sa = torch.sum(SA_map)/total_faces
-    return sa
+        raise ValueError("Choose method\n 'gradient' for fast phase-field approach\n 'face_counting' for face counting or\n 'marching_cubes' for marching cubes method.")
+
+    return surface_areas
 
 def triple_phase_boundary(img):
     """Calculate triple phase boundary density i.e. fraction of voxel verticies that touch at least 3 phases
 
     Args:
-        img (numpy array): image to calculate metric on     
+        img (numpy array): image to calculate metric on
     Returns:
         float: triple phase boundary density 
     """
