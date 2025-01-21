@@ -57,7 +57,7 @@ def crop_area_of_interest_numpy(array, labels):
                       max(min_idx[2]-3, 0):min(max_idx[2]+4, array.shape[2])]
     return sub_array
 
-def gaussian_kernel_3d_torch(size=3, sigma=1.0, device):
+def gaussian_kernel_3d_torch(device, size=3, sigma=1.0):
     """Creates a 3D Gaussian kernel using PyTorch"""
     ax = torch.linspace(-(size // 2), size // 2, size)
     xx, yy, zz = torch.meshgrid(ax, ax, ax, indexing="ij")
