@@ -7,6 +7,7 @@ try:
 except ImportError:
     raise ImportError("Pytorch is required to use this package. Please install pytorch and try again. More information about TauFactor's requirements can be found at https://taufactor.readthedocs.io/en/latest/")
 import warnings
+from .metrics import extract_through_feature
 
 class BaseSolver:
     def __init__(self, img, bc=(-0.5, 0.5), device=torch.device('cuda')):
@@ -89,7 +90,9 @@ class BaseSolver:
         fl = torch.sum(vert_flux, (0, 2, 3))
         err = (fl.max() - fl.min())/(fl.max())
         if fl.min() == 0:
-            return 'zero_flux', torch.mean(fl), err
+            _ , frac = extract_through_feature(self.cpu_img[0], 1, 'x')
+            if frac == 0:
+                return 'zero_flux', torch.mean(fl), err
         if err < conv_crit or torch.isnan(err).item():
             return True, torch.mean(fl), err
         return False, torch.mean(fl), err
