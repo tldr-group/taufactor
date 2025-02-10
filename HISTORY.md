@@ -1,5 +1,19 @@
 # History
 
+## 1.2.0 (2025-02-10)
+
+---
+
+- Add paper to README 
+- Exit solve after iter_limit reached (wasn't enforced before) by @amirDahari1 in #96
+- Change error for negative flux (changed stop criteria) resolves #94 by @amirDahari1 in #95
+- Calc vertical flux function (returns the flux field) by @amirDahari1 in #98
+- Deleted unused variables by @amirDahari1 in #103
+- Use inheritance for check_vertical_flux (cleanup) by @daubners in #104
+- Add AnisotropySolver (if the z-spacing is different than x- or y-spacing) by @daubners in #105
+- New surface areas (face counting, gradient and marching cubes) by @daubners in #107
+- Through connectivity (checks if there's phase connectivity) by @daubners in #106
+
 ## 1.1.0 (2023-07-24)
 
 ---
