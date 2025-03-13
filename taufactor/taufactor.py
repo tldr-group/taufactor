@@ -2,6 +2,7 @@
 import numpy as np
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
+import psutil
 try:
     import torch
 except ImportError:
@@ -114,6 +115,14 @@ class BaseSolver:
             print(f'{converged}: {self.tau} \
                   after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
                   seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
+            if self.device.type == 'cuda':
+                print(f"GPU-RAM currently allocated {torch.cuda.memory_allocated(device=self.device) / 1e6:.2f} MB ({torch.cuda.memory_reserved(device=self.device) / 1e6:.2f} MB reserved)")
+                print(f"GPU-RAM maximally allocated {torch.cuda.max_memory_allocated(device=self.device) / 1e6:.2f} MB ({torch.cuda.max_memory_reserved(device=self.device) / 1e6:.2f} MB reserved)")
+            elif self.device.type == 'cpu':
+                memory_info = psutil.virtual_memory()
+                print(f"CPU total memory: {memory_info.total / 1e6:.2f} MB")
+                print(f"CPU available memory: {memory_info.available / 1e6:.2f} MB")
+                print(f"CPU used memory: {memory_info.used / 1e6:.2f} MB")
 
 
 class Solver(BaseSolver):
@@ -179,6 +188,8 @@ class Solver(BaseSolver):
         max and min flux through a given layer
         :return: tau
         """
+        if (verbose) and (self.device.type == 'cuda'):
+            torch.cuda.reset_peak_memory_stats(device=self.device)
 
         with torch.no_grad():
             start = timer()
@@ -288,6 +299,8 @@ class AnisotropicSolver(Solver):
         max and min flux through a given layer
         :return: tau
         """
+        if (verbose) and (self.device.type == 'cuda'):
+            torch.cuda.reset_peak_memory_stats(device=self.device)
 
         with torch.no_grad():
             start = timer()
@@ -355,8 +368,11 @@ class PeriodicSolver(Solver):
         max and min flux through a given layer
         :return: tau
         """
+        if (verbose) and (self.device.type == 'cuda'):
+            torch.cuda.reset_peak_memory_stats(device=self.device)
+
         start = timer()
-        while not self.converged:
+        while not self.converged and self.iter < iter_limit:
             out = torch.zeros_like(self.conc)
             for dim in range(1, 4):
                 for dr in [1, -1]:
@@ -478,9 +494,11 @@ class MultiPhaseSolver(BaseSolver):
         max and min flux through a given layer
         :return: tau
         """
+        if (verbose) and (self.device.type == 'cuda'):
+            torch.cuda.reset_peak_memory_stats(device=self.device)
 
         start = timer()
-        while not self.converged:
+        while not self.converged and self.iter < iter_limit:
             self.iter += 1
             out = self.conc[:, 2:, 1:-1, 1:-1] * self.pre_factors[0][:, 2:, 1:-1, 1:-1] + \
                 self.conc[:, :-2, 1:-1, 1:-1] * self.pre_factors[1][:, :-2, 1:-1, 1:-1] + \
@@ -771,7 +789,7 @@ class ElectrodeSolver():
         self.loss = []
         self.tau_es = []
 
-        while not self.converged:
+        while not self.converged and self.iter < iter_limit:
             out = self.sum_neighbours()
             out *= self.prefactor*self.crop(self.phase_map)
             out[self.prefactor == -1] = 0
