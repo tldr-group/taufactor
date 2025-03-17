@@ -16,7 +16,7 @@ requirements = [
     'matplotlib>=3.4',
     'tifffile>=2023.2.3',
     'scikit-image>=0.20.0',
-    'scipy>=1.3'
+    'scipy>=1.3',
     'psutil>=5.9.0'
 ]
 
