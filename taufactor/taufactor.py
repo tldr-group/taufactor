@@ -160,7 +160,7 @@ class Solver(BaseSolver):
         super().__init__(img, bc, device)
         self.D_0 = D_0
         self.D_mean = None
-        self.VF = np.mean(img)
+        self.VF = np.mean(self.cpu_img, axis=(1,2,3))
 
         if len(np.unique(img).shape) > 2 or np.unique(img).max() not in [0, 1] or np.unique(img).min() not in [0, 1]:
             raise ValueError(
@@ -248,7 +248,7 @@ class Solver(BaseSolver):
             else:
                 self.D_rel[b] = (self.new_fl[b].cpu().numpy()) * self.L_A \
                                  / abs(self.top_bc - self.bot_bc)
-                self.tau[b] = self.VF / self.D_rel[b]
+                self.tau[b] = self.VF[b] / self.D_rel[b]
 
         if verbose == 'per_iter':
             if self.batch_size > 1:

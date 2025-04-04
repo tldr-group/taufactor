@@ -5,6 +5,7 @@ scikit-image
 matplotlib
 tifffile
 psutil
+ipython
 myst_parser
 sphinx==5.3.0
 sphinx_rtd_theme==1.1.1

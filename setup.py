@@ -17,7 +17,8 @@ requirements = [
     'tifffile>=2023.2.3',
     'scikit-image>=0.20.0',
     'scipy>=1.3',
-    'psutil>=5.9.0'
+    'psutil>=5.9.0',
+    'ipython>=7.0.0'
 ]
 
 setup_requirements = ['pytest-runner', ]
