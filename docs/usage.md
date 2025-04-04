@@ -139,19 +139,27 @@ vf = volume_fraction(img)
 vf = volume_fraction(img, phases={'pore':0, 'particle':1, 'binder':2})
 ```
 
-### Surface area
+### Specific surface area
 
-Surface area is calculated for each phase in a segmented image. The surface area returned is the fraction of interfacial faces with respect to the total number of faces n the image
+Per default, the specific surface area is calculated for each phase in a segmented image.
+Alternatively, the phases can be specified as phases={'phase1': 0, ...}.
+The method to compute surface area can be chosen as
+'face_counting', 'marching_cubes' or 'gradient'. A detailed comparison of these methods can be found in [Daubner _et al._](https://doi.org/10.1149/1945-7111/ad9a07).
+While face_counting is the fastest, the gradient method yields more accurate results for curved geometries.
 
 ```python
-from taufactor.metrics import surface_area
-# calculate the surface area of a single phase in an img
-sa = surface_area(img, phases=1)
+from taufactor.metrics import specific_surface_area
+# calculate the surface area of all phases in an image
+sa = specific_surface_area(img)
+
+# Surface area of a particular phase on anisotropic voxel grid (e.g. FIB-SEM data)
+sa = specific_surface_area(img, spacing=(1,1,3), phases={'pore': 0})
 
 # consider a three phase image with pore, particle and binder
 # where 0, 1, 2 correspond to pore, particle and binder respectively
-# calculate the surface area between pore and binder with periodic boundaries in y and z axes
-sa = surface_area(img, phases=[0,2], periodic=[0,1,1])
+# Use voxel face counting for fastest computation
+labels={'pore':0, 'particle':1, 'binder':2}
+sa = surface_area(img, phases=labels, method='face_counting')
 ```
 
 ### Triple phase boundary
