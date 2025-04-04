@@ -1,5 +1,6 @@
 """Main module."""
 import numpy as np
+from IPython.display import clear_output
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 import psutil
@@ -19,7 +20,13 @@ class BaseSolver:
             bc: Boundary conditions applied at top and bottom of domain.
             device: The device to perform computations ('cpu' or 'cuda').
         """
+        if not isinstance(img, np.ndarray):
+            raise TypeError("Error: input image must be a NumPy array!")
+        if img.ndim == 2:
+            # Convert 2D to pseudo-3D by expanding
+            img = np.expand_dims(img, axis=-1)
         self.top_bc, self.bot_bc = bc
+        # Add batch channel if not existent
         if len(img.shape) == 3:
             img = np.expand_dims(img, 0)
         self.cpu_img = img
@@ -42,12 +49,11 @@ class BaseSolver:
         self.w = 2 - torch.pi / (1.5 * img.shape[1])
         # checkerboarding to ensure stable steps
         self.cb = self.init_cb(img)
-        _, x, y, z = self.cpu_img.shape
+        self.batch_size, x, y, z = self.cpu_img.shape
         self.L_A = x / (z * y)
 
         # solving params
         self.converged = False
-        self.semi_converged = False
         self.old_fl = -1
         self.iter = 1
 
@@ -88,22 +94,34 @@ class BaseSolver:
 
     def check_vertical_flux(self, conv_crit):
         vert_flux = self.calc_vertical_flux()
-        fl = torch.sum(vert_flux, (0, 2, 3))
-        err = (fl.max() - fl.min())/(fl.max())
-        if fl.min() == 0 or (torch.mean(fl) == 0):
-            _ , frac = extract_through_feature(self.cpu_img[0], 1, 'x')
-            if frac == 0:
-                return 'zero_flux', torch.mean(fl), err
-        if err < conv_crit or torch.isnan(err).item():
-            return True, torch.mean(fl), err
-        return False, torch.mean(fl), err
+        # Sum over the y and z dimensions only, leaving a (bs, x) result.
+        fl = torch.sum(vert_flux, (2, 3)) # (bs, x)
+        fl_max, _ = torch.max(fl, dim=1)  # shape: (bs,)
+        fl_min, _ = torch.min(fl, dim=1)  # shape: (bs,)
+        mean_fl = torch.mean(fl, dim=1)   # shape: (bs,)
+        
+        # Compute the error for each batch element:
+        err = (fl_max - fl_min) / fl_max
+
+        flags = []
+        for b in range(self.batch_size):
+            if (fl_min[b] == 0) or (mean_fl[b] == 0):
+                _ , frac = extract_through_feature(self.cpu_img[b], 1, 'x')
+                if frac == 0:
+                    print(f"Warning: batch element {b} has no percolating path!")
+                    flags.append("zero_flux")
+                else:
+                    flags.append("not_converged")
+            else:
+                if err[b].item() < conv_crit or torch.isnan(err[b]).item():
+                    flags.append("converged")
+                else:
+                    flags.append("not_converged")
+        return flags, mean_fl, err, fl
 
     def check_rolling_mean(self, conv_crit):
         err = (self.new_fl - self.old_fl) / (self.new_fl + self.old_fl)
-        if err < conv_crit:
-            return True
-        else:
-            return False
+        return torch.max(err) < conv_crit
 
     def end_simulation(self, iter_limit, verbose, start):
         converged = 'converged to'
@@ -177,8 +195,8 @@ class Solver(BaseSolver):
 
     def apply_boundary_conditions(self):
         pass
-    
-    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
+
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, plot_interval=10):
         """
         run a solve simulation
 
@@ -207,7 +225,7 @@ class Solver(BaseSolver):
                 out /= self.nn
                 # check convergence using criteria
                 if self.iter % 100 == 0:
-                    self.converged = self.check_convergence(verbose, conv_crit)
+                    self.converged = self.check_convergence(verbose, conv_crit, plot_interval)
                 # efficient way of adding flux to old conc with overrelaxation
                 out -= self.crop(self.conc, 1)
                 out *= self.cb[self.iter % 2]
@@ -218,24 +236,44 @@ class Solver(BaseSolver):
             self.end_simulation(iter_limit, verbose, start)
             return self.tau
 
-    def check_convergence(self, verbose, conv_crit):
-        # print progress
-        self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
-        if self.semi_converged == 'zero_flux':
-            self.D_rel = 0
-            self.tau = np.inf
-            return True
-        else:
-            self.D_rel = ((self.new_fl) * self.L_A /
-                        abs(self.top_bc - self.bot_bc)).cpu()
-            self.tau = self.VF / \
-                self.D_rel if self.D_rel != 0 else torch.tensor(torch.inf)
+    def check_convergence(self, verbose, conv_crit, plot_interval):
+        flags, self.new_fl, err, slice_fluxes = self.check_vertical_flux(conv_crit)
+        self.D_rel = np.zeros(self.batch_size)
+        self.tau = np.zeros(self.batch_size)
+        for b in range(self.batch_size):
+            if flags[b] == "zero_flux":
+                self.D_rel[b] = 0
+                self.tau[b] = np.inf
+                flags[b] = "converged"
+            else:
+                self.D_rel[b] = (self.new_fl[b].cpu().numpy()) * self.L_A \
+                                 / abs(self.top_bc - self.bot_bc)
+                self.tau[b] = self.VF / self.D_rel[b]
 
         if verbose == 'per_iter':
-            print(
-                f'Iter: {self.iter}, conv error: {abs(err.item())}, tau: {self.tau.item()}')
+            if self.batch_size > 1:
+                print('Warning: Verbose per_iter will only output the first batch element.')
+            print(f'Iter: {self.iter}, conv error: {abs((err[0]).item())}, tau: {self.tau[0].item()}')
+            
+        if (verbose == 'plot') and (self.iter % (100*plot_interval) == 0):
+            clear_output(wait=True)
+            print(f'Iter: {self.iter}, conv error: {abs(err[0].item())}, tau: {self.tau[0].item()} (batch element 0)')
+            rel_fluxes = ((slice_fluxes - self.new_fl.unsqueeze(1))/self.new_fl.unsqueeze(1)).cpu().numpy()
+            fig, ax = plt.subplots(figsize=(8,2), dpi=200)
+            x = np.arange(0, rel_fluxes.shape[1])+0.5
+            for b in range(self.batch_size):
+                ax.plot(x, rel_fluxes[b], label=f'batch_{b}', linestyle='-')
 
-        if self.semi_converged:
+            ax.set_xlabel('voxels in x')
+            ax.set_ylabel('relative fluxes')
+            ax.set_title(f'Relative flux convergence in flux direction in iter {self.iter}')
+            ax.set_ylim(-0.1, 0.1)
+            ax.legend()
+            ax.grid()
+            plt.show()
+
+        overall_converged = all(flag == "converged" for flag in flags)
+        if overall_converged:
             self.converged = self.check_rolling_mean(conv_crit=1e-3)
 
             if not self.converged:
@@ -290,7 +328,7 @@ class AnisotropicSolver(Solver):
         nn[nn == 0] = torch.inf
         return nn.to(self.device)
 
-    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
+    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, plot_interval=10):
         """
         run a solve simulation
 
@@ -315,7 +353,7 @@ class AnisotropicSolver(Solver):
                 out /= self.nn
                 # check convergence using criteria
                 if self.iter % 100 == 0:
-                    self.converged = self.check_convergence(verbose, conv_crit)
+                    self.converged = self.check_convergence(verbose, conv_crit, plot_interval)
                 # efficient way of adding flux to old conc with overrelaxation
                 out -= self.crop(self.conc, 1)
                 out *= self.cb[self.iter % 2]
@@ -335,6 +373,7 @@ class PeriodicSolver(Solver):
      - the function to apply boundary conditions 
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
+
     def init_nn(self, img):
         img2 = self.pad(img, [2, 2])[:, :, 1:-1, 1:-1]
         nn = torch.zeros_like(img2)
@@ -382,6 +421,8 @@ class MultiPhaseSolver(BaseSolver):
 
         # Results
         super().__init__(img, bc, device)
+        if self.batch_size > 1:
+            raise TypeError('Error: The MultiPhaseSolver is only implemented for batch_size=1!')
         self.pre_factors = self.nn[1:]
         self.nn = self.nn[0]
 
@@ -474,28 +515,28 @@ class MultiPhaseSolver(BaseSolver):
 
     def check_convergence(self, verbose, conv_crit):
         # print progress
-        self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
+        semi_converged, self.new_fl, err, _ = self.check_vertical_flux(conv_crit)
         _, x, y, z = self.cpu_img.shape
-        self.D_eff = (self.new_fl*(x+1)/(y*z)).cpu()
+        self.D_eff = (self.new_fl[0]*(x+1)/(y*z)).cpu()
         self.tau = self.D_mean / \
             self.D_eff if self.D_eff != 0 else torch.tensor(torch.inf)
-        if self.semi_converged == 'zero_flux':
+        if semi_converged[0] == 'zero_flux':
             return True
 
         if verbose == 'per_iter':
             print(
-                f'Iter: {self.iter}, conv error: {abs(err.item())}, tau: {self.tau.item()}')
+                f'Iter: {self.iter}, conv error: {abs(err[0].item())}, tau: {self.tau.item()}')
 
-        if self.semi_converged:
+        if semi_converged[0]:
             self.converged = self.check_rolling_mean(conv_crit=1e-3)
 
             if not self.converged:
-                self.old_fl = self.new_fl
+                self.old_fl = self.new_fl[0]
                 return False
             else:
                 return True
         else:
-            self.old_fl = self.new_fl
+            self.old_fl = self.new_fl[0]
             return False
 
         # increase precision to double if currently single
