@@ -175,6 +175,9 @@ class Solver(BaseSolver):
         nn[nn == 0] = torch.inf
         return nn.to(self.device)
 
+    def apply_boundary_conditions(self):
+        pass
+    
     def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2):
         """
         run a solve simulation
@@ -192,6 +195,7 @@ class Solver(BaseSolver):
         with torch.no_grad():
             start = timer()
             while not self.converged and self.iter <= iter_limit:
+                self.apply_boundary_conditions()
                 # find sum of all nearest neighbours
                 out = self.conc[:, 2:, 1:-1, 1:-1] + \
                     self.conc[:, :-2, 1:-1, 1:-1] + \
@@ -325,77 +329,30 @@ class AnisotropicSolver(Solver):
 
 class PeriodicSolver(Solver):
     """
-    Periodic Solver (works for non-periodic structures, but has higher RAM requirements)
+    Solver with periodic boundary conditions in y and z direction.
+    Only differences to the standard solver are the
+     - neighbour matrix accounting for conductive neighbours on the other side and
+     - the function to apply boundary conditions 
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
-
-    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda:0')):
-        """
-        Initialise parameters, conc map and other tools that can be re-used
-        for multiple solves.
-
-        :param img: input img with 1s conductive and 0s non-conductive
-        :param bc: Upper and lower boundary conditions. Leave as default.
-        :param D_0: reference material diffusivity
-
-        """
-        super().__init__(img, bc, D_0, device)
-        self.conc = self.pad(self.conc)[:, :, 2:-2, 2:-2].to(self.device)
-
     def init_nn(self, img):
-        img2 = self.pad(self.pad(img, [2, 2]))[:, :, 2:-2, 2:-2]
+        img2 = self.pad(img, [2, 2])[:, :, 1:-1, 1:-1]
         nn = torch.zeros_like(img2)
         # iterate through shifts in the spatial dimensions
         for dim in range(1, 4):
             for dr in [1, -1]:
                 nn += torch.roll(img2, dr, dim)
         # avoid div 0 errors
-        nn = nn[:, 2:-2]
+        nn = nn[:, 1:-1]
         nn[img == 0] = torch.inf
         nn[nn == 0] = torch.inf
         return nn.to(self.device)
 
-    def solve(self, iter_limit=5000, verbose=True, conv_crit=2*10**-2, D_0=1):
-        """
-        run a solve simulation
-
-        :param iter_limit: max iterations before aborting, will attemtorch double for the same no. iterations
-        if initialised as singles
-        :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
-        :param conv_crit: convergence criteria, minimum percent difference between
-        max and min flux through a given layer
-        :return: tau
-        """
-        if (verbose) and (self.device.type == 'cuda'):
-            torch.cuda.reset_peak_memory_stats(device=self.device)
-
-        start = timer()
-        while not self.converged and self.iter <= iter_limit:
-            out = torch.zeros_like(self.conc)
-            for dim in range(1, 4):
-                for dr in [1, -1]:
-                    out += torch.roll(self.conc, dr, dim)
-            out = out[:, 2:-2]
-            out /= self.nn
-            if self.iter % 50 == 0:
-                self.converged = self.check_convergence(verbose, conv_crit)
-            out -= self.conc[:, 2:-2]
-            out *= self.cb[self.iter % 2]
-            self.conc[:, 2:-2] += out
-            self.iter += 1
-
-        self.D_mean = D_0
-        self.D_eff = D_0*self.D_rel
-        self.end_simulation(iter_limit, verbose, start)
-        return self.tau
-
-    def calc_vertical_flux(self):
-        '''Calculates the vertical flux through the volume'''
-        # Indexing removes 2 boundary layers at top and bottom
-        vert_flux = self.conc[:, 3:-2] - self.conc[:, 2:-3]
-        vert_flux[self.conc[:, 3:-2] == 0] = 0
-        vert_flux[self.conc[:, 2:-3] == 0] = 0
-        return vert_flux
+    def apply_boundary_conditions(self):
+        self.conc[:,:,0,:] = self.conc[:,:,-2,:]
+        self.conc[:,:,-1,:] = self.conc[:,:,1,:]
+        self.conc[:,:,:,0] = self.conc[:,:,:,-2]
+        self.conc[:,:,:,-1] = self.conc[:,:,:,1]
 
 
 class MultiPhaseSolver(BaseSolver):
