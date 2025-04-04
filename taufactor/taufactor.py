@@ -1,5 +1,6 @@
 """Main module."""
 import numpy as np
+from IPython.display import clear_output
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 import psutil
@@ -49,7 +50,7 @@ class BaseSolver:
         self.converged = False
         self.semi_converged = False
         self.old_fl = -1
-        self.iter = 0
+        self.iter = 1
 
         # Results
         self.tau = None
@@ -64,7 +65,7 @@ class BaseSolver:
         a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
         cb[(a + b + c) % 2 == 0] = 1
         cb *= self.w
-        return [torch.roll(torch.tensor(cb, dtype=self.precision).to(self.device), sh, 0) for sh in [0, 1]]
+        return [torch.roll(torch.tensor(cb, dtype=self.precision, device=self.device), sh, 0) for sh in [0, 1]]
 
     def solve(self):
         """Solve given PDE"""
@@ -90,7 +91,7 @@ class BaseSolver:
         vert_flux = self.calc_vertical_flux()
         fl = torch.sum(vert_flux, (0, 2, 3))
         err = (fl.max() - fl.min())/(fl.max())
-        if fl.min() == 0:
+        if fl.min() == 0 or (torch.mean(fl) == 0):
             _ , frac = extract_through_feature(self.cpu_img[0], 1, 'x')
             if frac == 0:
                 return 'zero_flux', torch.mean(fl), err
@@ -107,14 +108,12 @@ class BaseSolver:
 
     def end_simulation(self, iter_limit, verbose, start):
         converged = 'converged to'
-        if self.iter >= iter_limit - 1:
+        if self.iter >= iter_limit:
             print('Warning: not converged')
             converged = 'unconverged value of tau'
 
         if verbose:
-            print(f'{converged}: {self.tau} \
-                  after: {self.iter} iterations in: {np.around(timer() - start, 4)}  \
-                  seconds at a rate of {np.around((timer() - start)/self.iter, 4)} s/iter')
+            print(f'{converged}: {self.tau} after: {self.iter-1} iterations in: {np.around(timer() - start, 4)}s ({np.around((timer() - start)/(self.iter-1), 4)} s/iter)')
             if self.device.type == 'cuda':
                 print(f"GPU-RAM currently allocated {torch.cuda.memory_allocated(device=self.device) / 1e6:.2f} MB ({torch.cuda.memory_reserved(device=self.device) / 1e6:.2f} MB reserved)")
                 print(f"GPU-RAM maximally allocated {torch.cuda.max_memory_allocated(device=self.device) / 1e6:.2f} MB ({torch.cuda.max_memory_reserved(device=self.device) / 1e6:.2f} MB reserved)")
@@ -193,7 +192,7 @@ class Solver(BaseSolver):
 
         with torch.no_grad():
             start = timer()
-            while not self.converged and self.iter < iter_limit:
+            while not self.converged and self.iter <= iter_limit:
                 # find sum of all nearest neighbours
                 out = self.conc[:, 2:, 1:-1, 1:-1] + \
                     self.conc[:, :-2, 1:-1, 1:-1] + \
@@ -304,7 +303,7 @@ class AnisotropicSolver(Solver):
 
         with torch.no_grad():
             start = timer()
-            while not self.converged and self.iter < iter_limit:
+            while not self.converged and self.iter <= iter_limit:
                 # find sum of all nearest neighbours
                 out = self.conc[:, 2:, 1:-1, 1:-1] + self.conc[:, :-2, 1:-1, 1:-1] + \
                       self.Ky*(self.conc[:, 1:-1, 2:, 1:-1] + self.conc[:, 1:-1, :-2, 1:-1]) + \
@@ -498,8 +497,7 @@ class MultiPhaseSolver(BaseSolver):
             torch.cuda.reset_peak_memory_stats(device=self.device)
 
         start = timer()
-        while not self.converged and self.iter < iter_limit:
-            self.iter += 1
+        while not self.converged and self.iter <= iter_limit:
             out = self.conc[:, 2:, 1:-1, 1:-1] * self.pre_factors[0][:, 2:, 1:-1, 1:-1] + \
                 self.conc[:, :-2, 1:-1, 1:-1] * self.pre_factors[1][:, :-2, 1:-1, 1:-1] + \
                 self.conc[:, 1:-1, 2:, 1:-1] * self.pre_factors[2][:, 1:-1, 2:, 1:-1] + \
@@ -508,41 +506,41 @@ class MultiPhaseSolver(BaseSolver):
                 self.conc[:, 1:-1, 1:-1, :-2] * \
                 self.pre_factors[5][:, 1:-1, 1:-1, :-2]
             out /= self.nn
-            if self.iter % 20 == 0:
+            if self.iter % 100 == 0:
                 self.converged = self.check_convergence(verbose, conv_crit)
             out -= self.crop(self.conc, 1)
             out *= self.cb[self.iter % 2]
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
+            self.iter += 1
 
         self.end_simulation(iter_limit, verbose, start)
         return self.tau
 
     def check_convergence(self, verbose, conv_crit):
         # print progress
-        if self.iter % 100 == 0:
-            self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
-            _, x, y, z = self.cpu_img.shape
-            self.D_eff = (self.new_fl*(x+1)/(y*z)).cpu()
-            self.tau = self.D_mean / \
-                self.D_eff if self.D_eff != 0 else torch.tensor(torch.inf)
-            if self.semi_converged == 'zero_flux':
-                return True
+        self.semi_converged, self.new_fl, err = self.check_vertical_flux(conv_crit)
+        _, x, y, z = self.cpu_img.shape
+        self.D_eff = (self.new_fl*(x+1)/(y*z)).cpu()
+        self.tau = self.D_mean / \
+            self.D_eff if self.D_eff != 0 else torch.tensor(torch.inf)
+        if self.semi_converged == 'zero_flux':
+            return True
 
-            if verbose == 'per_iter':
-                print(
-                    f'Iter: {self.iter}, conv error: {abs(err.item())}, tau: {self.tau.item()}')
+        if verbose == 'per_iter':
+            print(
+                f'Iter: {self.iter}, conv error: {abs(err.item())}, tau: {self.tau.item()}')
 
-            if self.semi_converged:
-                self.converged = self.check_rolling_mean(conv_crit=1e-3)
+        if self.semi_converged:
+            self.converged = self.check_rolling_mean(conv_crit=1e-3)
 
-                if not self.converged:
-                    self.old_fl = self.new_fl
-                    return False
-                else:
-                    return True
-            else:
+            if not self.converged:
                 self.old_fl = self.new_fl
                 return False
+            else:
+                return True
+        else:
+            self.old_fl = self.new_fl
+            return False
 
         # increase precision to double if currently single
         # if self.iter >= iter_limit:
