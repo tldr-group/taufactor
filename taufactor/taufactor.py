@@ -1,6 +1,5 @@
 """Main module."""
 import numpy as np
-from IPython.display import clear_output
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 import psutil
@@ -371,7 +370,7 @@ class PeriodicSolver(Solver):
             torch.cuda.reset_peak_memory_stats(device=self.device)
 
         start = timer()
-        while not self.converged and self.iter < iter_limit:
+        while not self.converged and self.iter <= iter_limit:
             out = torch.zeros_like(self.conc)
             for dim in range(1, 4):
                 for dr in [1, -1]:
@@ -615,7 +614,7 @@ class ElectrodeSolver():
         self.converged = False
         self.semiconverged = False
         self.old_fl = -1
-        self.iter = 0
+        self.iter = 1
 
         # Results
         self.tau_e = 0
@@ -787,7 +786,7 @@ class ElectrodeSolver():
         self.loss = []
         self.tau_es = []
 
-        while not self.converged and self.iter < iter_limit:
+        while not self.converged and self.iter <= iter_limit:
             out = self.sum_neighbours()
             out *= self.prefactor*self.crop(self.phase_map)
             out[self.prefactor == -1] = 0
