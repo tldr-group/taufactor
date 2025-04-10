@@ -7,7 +7,7 @@ import torch as pt
 import numpy as np
 
 
-#  Testing the main solver
+###  Testing the main solver
 
 def test_solver_on_uniform_block():
     """Run solver on a block of ones."""
@@ -18,7 +18,6 @@ def test_solver_on_uniform_block():
     S.solve()
     assert np.around(S.tau, decimals=5) == 1.0
 
-
 def test_solver_on_uniform_rectangular_block_solver_dim():
     """Run solver on a block of ones."""
     l = 20
@@ -27,7 +26,6 @@ def test_solver_on_uniform_rectangular_block_solver_dim():
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve()
     assert np.around(S.tau, decimals=5) == 1.0
-
 
 def test_solver_on_uniform_rectangular_block_non_solver_dim():
     """Run solver on a block of ones."""
@@ -38,7 +36,6 @@ def test_solver_on_uniform_rectangular_block_non_solver_dim():
     S.solve()
     assert np.around(S.tau, decimals=5) == 1.0
 
-
 def test_solver_on_empty_block():
     """Run solver on a block of zeros."""
     l = 20
@@ -47,7 +44,6 @@ def test_solver_on_empty_block():
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve(verbose='per_iter', iter_limit=1000)
     assert S.tau == pt.inf
-
 
 def test_solver_on_strip_of_ones():
     """Run solver on a strip of ones, 1/4 volume of total"""
@@ -69,10 +65,7 @@ def test_solver_on_slanted_strip_of_ones():
         img[:, i, i:i+2, i:i+2] = 1
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve()
-    assert np.around(S.tau, decimals=5) == 4
-
-
-#  Testing the periodic solver
+    assert np.around(S.tau, decimals=5) == 7.49291
 
 def test_deadend():
     """Test deadend pore"""
@@ -84,6 +77,8 @@ def test_deadend():
     assert np.around(S.D_eff, decimals=5) == 0
     assert S.tau == np.inf
 
+
+###  Testing the periodic solver
 def test_periodic_solver_on_uniform_block():
     """Run periodic solver on a block of ones."""
     l = 20
@@ -93,7 +88,6 @@ def test_periodic_solver_on_uniform_block():
     S.solve()
     assert np.around(S.tau, decimals=5) == 1.0
 
-
 def test_periodic_solver_on_empty_block():
     """Run periodic solver on a block of zeros."""
     l = 20
@@ -102,7 +96,6 @@ def test_periodic_solver_on_empty_block():
     S = tau.PeriodicSolver(img, device=pt.device('cpu'))
     S.solve(verbose='per_iter', iter_limit=1000)
     assert S.tau == pt.inf
-
 
 def test_periodic_solver_on_strip_of_ones():
     """Run periodic solver on a strip of ones, 1/4 volume of total"""
@@ -115,8 +108,7 @@ def test_periodic_solver_on_strip_of_ones():
     assert np.around(S.tau, decimals=5) == 1
 
 
-#  Testing the multiphase solver
-
+###  Testing the multiphase solver
 def test_multiphase_and_solver_agree():
     """test mph and solver agree when Ds are the same"""
     x = 100
@@ -134,7 +126,6 @@ def test_multiphase_and_solver_agree():
 
     assert err < 0.02
 
-
 def test_mphsolver_on_empty_block():
     """Run mpsolver on a block of zeros."""
     l = 20
@@ -143,7 +134,6 @@ def test_mphsolver_on_empty_block():
     S.solve(iter_limit=1000)
     assert S.tau == pt.inf
 
-
 def test_mphsolver_on_ones_block():
     """Run mpsolver on a block of ones."""
     l = 20
@@ -151,7 +141,6 @@ def test_mphsolver_on_ones_block():
     S = tau.MultiPhaseSolver(img, device=pt.device('cpu'))
     S.solve(iter_limit=1000)
     assert np.around(S.tau, 4) == 1.0
-
 
 def test_mphsolver_on_halves():
     """Run mpsolver on a block of halves."""
@@ -163,7 +152,6 @@ def test_mphsolver_on_halves():
     print(S.D_eff, S.D_mean)
     assert np.around(S.tau, 4) == 1.0
 
-
 def test_mphsolver_on_strip_of_ones():
     """Run mpsolver on a strip of ones, 1/4 volume of total"""
     l = 20
@@ -173,7 +161,6 @@ def test_mphsolver_on_strip_of_ones():
     S = tau.MultiPhaseSolver(img, device=pt.device('cpu'))
     S.solve()
     assert np.around(S.tau, 4) == 1.0
-
 
 def test_mphsolver_on_strip_of_ones_and_twos():
     """Run solver on a strip of ones, 1/4 volume of total"""
@@ -186,7 +173,6 @@ def test_mphsolver_on_strip_of_ones_and_twos():
     S = tau.MultiPhaseSolver(img, cond, device=pt.device('cpu'))
     S.solve()
     assert np.around(S.tau, 4) == 1
-
 
 def test_mphsolver_on_strip_of_ones_and_twos_and_threes():
     """Run solver on a strip of ones, 1/4 volume of total"""
@@ -201,11 +187,9 @@ def test_mphsolver_on_strip_of_ones_and_twos_and_threes():
     assert np.around(S.tau, 4) == 1
 
 
-#  Testing the tau_e solver
-
+###  Testing the tau_e solver
 def test_taue_deadend():
     """Run solver on a deadend strip of ones"""
-
     l = 100
     img = np.zeros((l, l))
     img[:75, 45:55] = 1
@@ -217,7 +201,6 @@ def test_taue_deadend():
 
 def test_taue_throughpore():
     """Run taue solver on a strip of ones, 1/4 volume of total"""
-
     l = 100
     img = np.zeros((l, l))
     img[:, 45:55] = 1

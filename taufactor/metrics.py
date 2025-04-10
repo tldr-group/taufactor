@@ -1,4 +1,5 @@
 import numpy as np
+import psutil
 import torch
 import torch.nn.functional as F
 import warnings
@@ -78,7 +79,7 @@ def gaussian_kernel_3d_numpy(size=3, sigma=1.0):
     kernel /= np.sum(kernel)
     return kernel
 
-def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', device=torch.device('cuda'), smoothing=True):
+def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', device=torch.device('cuda'), smoothing=True, verbose=False):
     """
     Calculate the specific surface area of all (specified) phases
     :param img: labelled microstructure where each integer value represents a phase
@@ -90,6 +91,7 @@ def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', de
     [dx,dy,dz] = spacing
     surface_areas = {}
 
+    device = torch.device(device)
     if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
         device = torch.device('cpu')
         warnings.warn("CUDA not available, defaulting device to cpu.")
@@ -100,6 +102,9 @@ def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', de
         else:
             tensor = img
         tensor = tensor.to(device)
+    
+    if (verbose) and (device.type == 'cuda'):
+        torch.cuda.reset_peak_memory_stats(device=device)
 
     if method == 'gradient':
         if phases=={}:
@@ -161,9 +166,9 @@ def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', de
                     surface_areas[name] = count / volume
 
     elif method == 'marching_cubes':
-        if device != 'cpu':
+        if device.type != 'cpu':
             warnings.warn("The marching cubes algorithm is performed on the CPU based on scikit-image package.")
-        if dx != dy | dx!= dz | dy!=dz:
+        if (dx != dy) or (dx!= dz) or (dy!=dz):
             raise ValueError("Surface area computation based on marching cubes assumes dx=dy=dz.")
 
         if type(img) is type(torch.tensor(1)):
@@ -188,6 +193,16 @@ def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', de
 
     else:
         raise ValueError("Choose method\n 'gradient' for fast phase-field approach\n 'face_counting' for face counting or\n 'marching_cubes' for marching cubes method.")
+    
+    if verbose:
+        if device.type == 'cuda':
+            print(f"GPU-RAM currently allocated {torch.cuda.memory_allocated(device=device) / 1e6:.2f} MB ({torch.cuda.memory_reserved(device=device) / 1e6:.2f} MB reserved)")
+            print(f"GPU-RAM maximally allocated {torch.cuda.max_memory_allocated(device=device) / 1e6:.2f} MB ({torch.cuda.max_memory_reserved(device=device) / 1e6:.2f} MB reserved)")
+        elif device.type == 'cpu':
+            memory_info = psutil.virtual_memory()
+            print(f"CPU total memory: {memory_info.total / 1e6:.2f} MB")
+            print(f"CPU available memory: {memory_info.available / 1e6:.2f} MB")
+            print(f"CPU used memory: {memory_info.used / 1e6:.2f} MB")
 
     return surface_areas
 
