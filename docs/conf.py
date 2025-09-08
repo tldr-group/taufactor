@@ -2,9 +2,16 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('..'))
 
+import taufactor
+
 project = 'taufactor'
 copyright = "2023, tldr group"
 author = "tldr group"
+
+# The short X.Y version.
+version = taufactor.__version__
+# The full version, including alpha/beta/rc tags.
+release = taufactor.__version__
 
 extensions = [
     'sphinx.ext.autodoc',
@@ -22,7 +29,6 @@ myst_enable_extensions = [
 
 nb_execution_mode = 'off'
 html_theme = 'sphinx_rtd_theme'
-html_static_path = ['_static']
 autodoc_mock_imports = [
     'matplotlib',
     'pyvista',
@@ -32,7 +38,6 @@ autodoc_mock_imports = [
     'torch'
 ]
 master_doc = 'index'
-source_suffix = ['.rst', '.md']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 autodoc_default_options = {
