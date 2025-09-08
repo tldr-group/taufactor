@@ -2,8 +2,6 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('..'))
 
-import taufactor
-
 project = 'taufactor'
 copyright = "2023, tldr group"
 author = "tldr group"
@@ -44,14 +42,6 @@ autodoc_default_options = {
     'special-members': '__init__',
     'inherited-members': False,
 }
-
-# The version info for the project you're documenting, acts as replacement
-# for |version| and |release|, also used in various other places throughout
-# the built documents.
-# The short X.Y version.
-version = taufactor.__version__
-# The full version, including alpha/beta/rc tags.
-release = taufactor.__version__
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
