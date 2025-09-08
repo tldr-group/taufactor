@@ -1,14 +1,10 @@
-#!/usr/bin/env python
-
 """Tests for `taufactor` package."""
 
 from taufactor.metrics import volume_fraction, specific_surface_area, triple_phase_boundary
-from tests.utils import *
 import numpy as np
 
 
 # Volume fraction
-
 def test_volume_fraction_on_uniform_block():
     """Run volume fraction on uniform block"""
     l = 20
@@ -29,9 +25,11 @@ def test_volume_fraction_on_empty_block():
 
 def test_volume_fraction_on_checkerboard():
     """Run volume fraction on checkerboard block"""
-    l = 20
-    img = generate_checkerboard(l)
-    vf = volume_fraction(img, phases={'zeros': 0, 'ones': 1})
+    size = 20
+    cb = np.zeros([size, size, size])
+    a, b, c = np.meshgrid(range(size), range(size), range(size), indexing='ij')
+    cb[(a + b + c) % 2 == 0] = 1
+    vf = volume_fraction(cb, phases={'zeros': 0, 'ones': 1})
 
     assert (vf['zeros'], vf['ones']) == (0.5, 0.5)
 
