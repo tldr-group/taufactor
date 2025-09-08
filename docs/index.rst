@@ -8,7 +8,7 @@ Welcome to TauFactor's documentation!
    readme
    installation
    usage
-   taufactor
+   api
    contributing
    authors
    history
