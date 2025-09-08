@@ -12,7 +12,7 @@ import warnings
 from .metrics import extract_through_feature
 
 class BaseSolver:
-    def __init__(self, img, bc=(-0.5, 0.5), device=torch.device('cuda')):
+    def __init__(self, img, bc=(-0.5, 0.5), device='cuda'):
         """
         Base solver class to handle common functionality for different solvers.
         Args:
@@ -147,7 +147,7 @@ class Solver(BaseSolver):
     called, tau, D_eff and D_rel are available as attributes.
     """
 
-    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda')):
+    def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device='cuda'):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -300,7 +300,7 @@ class AnisotropicSolver(Solver):
     Anisotropic Solver e.g. for FIB-SEM datsets where spacing in cutting direction it different from pixel resolution
     """
 
-    def __init__(self, img, spacing, bc=(-0.5, 0.5), D_0=1, device=torch.device('cuda:0')):
+    def __init__(self, img, spacing, bc=(-0.5, 0.5), D_0=1, device='cuda'):
         if not isinstance(spacing, (list, tuple)) or len(spacing) != 3:
             raise ValueError("spacing must be a list or tuple with three elements (dx, dy, dz)")
         if not all(isinstance(x, (int, float)) for x in spacing):
@@ -400,7 +400,7 @@ class MultiPhaseSolver(BaseSolver):
     called, tau, D_eff and D_rel are available as attributes.
     """
 
-    def __init__(self, img, cond={1: 1}, bc=(-0.5, 0.5), device=torch.device('cuda:0')):
+    def __init__(self, img, cond={1: 1}, bc=(-0.5, 0.5), device='cuda'):
         """
         Initialise parameters, conc map and other tools that can be re-used
         for multiple solves.
@@ -566,7 +566,7 @@ class ElectrodeSolver():
     Once solve method is called, tau, D_eff and D_rel are available as attributes.
     """
 
-    def __init__(self, img, omega=1e-6, device=torch.device('cuda')):
+    def __init__(self, img, omega=1e-6, device='cuda'):
 
         img = np.expand_dims(img, 0)
         self.cpu_img = img

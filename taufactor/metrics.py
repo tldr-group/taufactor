@@ -79,7 +79,7 @@ def gaussian_kernel_3d_numpy(size=3, sigma=1.0):
     kernel /= np.sum(kernel)
     return kernel
 
-def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', device=torch.device('cuda'), smoothing=True, verbose=False):
+def specific_surface_area(img, spacing=(1,1,1), phases={}, method='gradient', device='cuda', smoothing=True, verbose=False):
     """
     Calculate the specific surface area of all (specified) phases
     :param img: labelled microstructure where each integer value represents a phase

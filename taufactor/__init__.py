@@ -1,19 +1,10 @@
 """Top-level package for TauFactor."""
 
+__version__ = '1.2.0'
+
 from .taufactor import Solver, AnisotropicSolver, PeriodicSolver, \
                        MultiPhaseSolver, ElectrodeSolver
 
-from .metrics import volume_fraction, \
-                     specific_surface_area, \
-                     triple_phase_boundary, \
-                     label_periodic, \
-                     extract_through_feature
-
 __all__ = ['Solver', 'AnisotropicSolver', 'PeriodicSolver',\
            'MultiPhaseSolver',\
-           'ElectrodeSolver',\
-           'volume_fraction', \
-           'specific_surface_area', \
-           'triple_phase_boundary', \
-           'label_periodic', \
-           'extract_through_feature' ]
+           'ElectrodeSolver']
