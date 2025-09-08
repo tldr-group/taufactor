@@ -29,8 +29,7 @@ autodoc_mock_imports = [
     'psutil',
     'IPython',
     'numpy',
-    'torch',
-    'taufactor'
+    'torch'
 ]
 master_doc = 'index'
 source_suffix = ['.rst', '.md']
