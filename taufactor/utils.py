@@ -29,10 +29,10 @@ def flux_direction(im, outpath=None):
             x, y = im_temp.shape
             ax[i].imshow(im_temp, cmap='gray')
             ax[i].axis('off')
-            t = ax[i].text(1.05*x, y//2, "Flux",
-                           ha="center", va="center", size=15, rotation=-90, family='monospace',
-                           bbox=dict(boxstyle="rarrow,pad=0.3",
-                                     fc="white", ec="black", lw=1))
+            ax[i].text(1.05*x, y//2, "Flux",
+                       ha="center", va="center", size=15, rotation=-90, family='monospace',
+                       bbox=dict(boxstyle="rarrow,pad=0.3",
+                       fc="white", ec="black", lw=1))
             if i == 0:
                 ax[i].set_title("img", family='monospace')
             else:

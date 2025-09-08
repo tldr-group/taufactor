@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "taufactor"
 version = "1.2.0"
-description = "TauFactor is an application for calculating tortuosity factors from tomographic data",
+description = "TauFactor is an application for calculating tortuosity factors from tomographic data"
 maintainers = [
     { name = "tldr group", email = "samuel.cooper@imperial.ac.uk" }
 ]
