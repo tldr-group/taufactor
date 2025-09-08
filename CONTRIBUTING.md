@@ -1,7 +1,7 @@
 # Contributing
 
-Contributions are welcome, and they are greatly appreciated! Every little bit
-helps, and credit will always be given.
+Contributions are welcome, and they are greatly appreciated!
+Every little bit helps, and credit will always be given.
 
 You can contribute in many ways:
 
@@ -50,45 +50,44 @@ Ready to contribute? Here's how to set up `taufactor` for local development.
 
 1. Fork the `taufactor` repo on GitHub.
 2. Clone your fork locally:
+   ```bash
+   git clone git@github.com:your_name_here/taufactor.git
+   ```
 
-```
-git clone git@github.com:your_name_here/taufactor.git
-```
+3. Create a new branch for your changes.
+   ```bash
+   cd taufactor
+   git checkout -b my_dev_branch
+   ```
 
-3. Install your local copy into a virtualenv. Assuming you have virtualenvwrapper installed, this is how you set up your fork for local development:
+4. Create a python environment
+   ```bash
+   conda create --name myenv python=3.12
+   conda activate myenv
+   ```
 
-```
-mkvirtualenv taufactor
-cd taufactor/
-python setup.py develop
-```
+5. Install the development dependencies and run the tests:
+   ```bash
+   pip install -e .[dev]
+   ruff check .
+   pytest
+   ```
 
-4. Create a branch for local development:
+6. When you're done making changes, check that your changes the tests
+   ```bash
+   ruff check .
+   pytest
+   ```
 
-```
-git checkout -b name-of-your-bugfix-or-feature
-```
+7. Commit your changes and push the branch to your fork.
+    If you added new features also provide tests to ensure their maintainance.
+    ```bash
+    git add my_changed_files
+    git commit -m "Detailed description of changes."
+    git push my_remote_fork my_dev_branch
+    ```
 
-5. When you're done making changes, check that your changes pass flake8 and the
-   tests, including testing other Python versions with tox:
-
-```
-flake8 taufactor tests
-python setup.py test or pytest
-tox
-```
-
-    To get flake8 and tox, just pip install them into your virtualenv.
-
-6. Commit your changes and push your branch to GitHub:
-
-```
-git add .
-git commit -m "Your detailed description of your changes."
-git push origin name-of-your-bugfix-or-feature
-```
-
-7. Submit a pull request through the GitHub website.
+8. Submit a pull request through the GitHub website and describe your contribution.
 
 ## Pull Request Guidelines
 

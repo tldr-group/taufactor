@@ -6,7 +6,8 @@ matplotlib
 tifffile
 psutil
 ipython
-myst_parser
 sphinx==5.3.0
 sphinx_rtd_theme==1.1.1
+myst_parser
 readthedocs-sphinx-search==0.1.1
+nbsphinx
