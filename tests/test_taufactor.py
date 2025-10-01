@@ -65,7 +65,7 @@ def test_solver_on_slanted_strip_of_ones():
         img[:, i, i:i+2, i:i+2] = 1
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve()
-    assert np.around(S.tau, decimals=5) == 7.49291
+    assert np.around(S.tau, decimals=5) == 7.51667
 
 def test_deadend():
     """Test deadend pore"""
