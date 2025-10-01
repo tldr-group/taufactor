@@ -1,6 +1,65 @@
 [build-system]
-requires = [
-    "setuptools>=42",
-    "wheel"
-]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "taufactor"
+version = "1.2.0"
+description = "TauFactor is an application for calculating tortuosity factors from tomographic data"
+maintainers = [
+    { name = "tldr group", email = "samuel.cooper@imperial.ac.uk" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    'Intended Audience :: Manufacturing',
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Environment :: GPU",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12"
+]
+dependencies = [
+    "numpy>=1.21",
+    "matplotlib>=3.4",
+    "pyvista>=0.38",
+    "tifffile>=2023.2.3",
+    "scikit-image>=0.20.0",
+    "scipy>=1.3",
+    "psutil>=5.9.0",
+    "ipython>=7.0.0",
+    "torch>=2.1"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff"
+]
+notebooks = [
+    "ipywidgets",
+    "ipympl",
+    "notebook"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["taufactor*"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+
+[tool.ruff]
+exclude = ["notebooks", "paper"]

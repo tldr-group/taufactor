@@ -11,8 +11,8 @@ import numpy as np
 
 def test_solver_on_uniform_block():
     """Run solver on a block of ones."""
-    l = 20
-    img = np.ones([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.ones([N, N, N]).reshape(1, N, N, N)
     img[:, :, 0] = 0
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve()
@@ -20,8 +20,8 @@ def test_solver_on_uniform_block():
 
 def test_solver_on_uniform_rectangular_block_solver_dim():
     """Run solver on a block of ones."""
-    l = 20
-    img = np.ones([l*2, l, l]).reshape(1, l*2, l, l)
+    N = 20
+    img = np.ones([N*2, N, N]).reshape(1, N*2, N, N)
     img[:, :, 0] = 0
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve()
@@ -29,8 +29,8 @@ def test_solver_on_uniform_rectangular_block_solver_dim():
 
 def test_solver_on_uniform_rectangular_block_non_solver_dim():
     """Run solver on a block of ones."""
-    l = 20
-    img = np.ones([l, l, l*2]).reshape(1, l, l, l*2)
+    N = 20
+    img = np.ones([N, N, N*2]).reshape(1, N, N, N*2)
     img[:, :, 0] = 0
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve()
@@ -38,8 +38,8 @@ def test_solver_on_uniform_rectangular_block_non_solver_dim():
 
 def test_solver_on_empty_block():
     """Run solver on a block of zeros."""
-    l = 20
-    img = np.zeros([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.zeros([N, N, N]).reshape(1, N, N, N)
     img[:, 0] = 1
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve(verbose='per_iter', iter_limit=1000)
@@ -47,8 +47,8 @@ def test_solver_on_empty_block():
 
 def test_solver_on_strip_of_ones():
     """Run solver on a strip of ones, 1/4 volume of total"""
-    l = 20
-    img = np.zeros([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.zeros([N, N, N]).reshape(1, N, N, N)
     t = 10
     img[:, :, 0:t, 0:t] = 1
     S = tau.Solver(img, device=pt.device('cpu'))
@@ -57,11 +57,11 @@ def test_solver_on_strip_of_ones():
 
 def test_solver_on_slanted_strip_of_ones():
     """Run solver on a slanted strip of ones"""
-    l = 20
-    img = np.zeros([l, l+1, l+1]).reshape(1, l, l+1, l+1)
+    N = 20
+    img = np.zeros([N, N+1, N+1]).reshape(1, N, N+1, N+1)
     # t = 10
     # img[:, :, 0:t, 0:t] = 1
-    for i in range(l):
+    for i in range(N):
         img[:, i, i:i+2, i:i+2] = 1
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve()
@@ -81,8 +81,8 @@ def test_deadend():
 ###  Testing the periodic solver
 def test_periodic_solver_on_uniform_block():
     """Run periodic solver on a block of ones."""
-    l = 20
-    img = np.ones([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.ones([N, N, N]).reshape(1, N, N, N)
     img[:, :, 0] = 0
     S = tau.PeriodicSolver(img, device=pt.device('cpu'))
     S.solve()
@@ -90,8 +90,8 @@ def test_periodic_solver_on_uniform_block():
 
 def test_periodic_solver_on_empty_block():
     """Run periodic solver on a block of zeros."""
-    l = 20
-    img = np.zeros([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.zeros([N, N, N]).reshape(1, N, N, N)
     img[:, 0] = 1
     S = tau.PeriodicSolver(img, device=pt.device('cpu'))
     S.solve(verbose='per_iter', iter_limit=1000)
@@ -99,8 +99,8 @@ def test_periodic_solver_on_empty_block():
 
 def test_periodic_solver_on_strip_of_ones():
     """Run periodic solver on a strip of ones, 1/4 volume of total"""
-    l = 20
-    img = np.zeros([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.zeros([N, N, N]).reshape(1, N, N, N)
     t = 10
     img[:, :, 0:t, 0:t] = 1
     S = tau.PeriodicSolver(img, device=pt.device('cpu'))
@@ -128,24 +128,24 @@ def test_multiphase_and_solver_agree():
 
 def test_mphsolver_on_empty_block():
     """Run mpsolver on a block of zeros."""
-    l = 20
-    img = np.zeros([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.zeros([N, N, N]).reshape(1, N, N, N)
     S = tau.MultiPhaseSolver(img, device=pt.device('cpu'))
     S.solve(iter_limit=1000)
     assert S.tau == pt.inf
 
 def test_mphsolver_on_ones_block():
     """Run mpsolver on a block of ones."""
-    l = 20
-    img = np.ones([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.ones([N, N, N]).reshape(1, N, N, N)
     S = tau.MultiPhaseSolver(img, device=pt.device('cpu'))
     S.solve(iter_limit=1000)
     assert np.around(S.tau, 4) == 1.0
 
 def test_mphsolver_on_halves():
     """Run mpsolver on a block of halves."""
-    l = 20
-    img = np.ones([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.ones([N, N, N]).reshape(1, N, N, N)
     cond = 0.5
     S = tau.MultiPhaseSolver(img, {1: cond}, device=pt.device('cpu'))
     S.solve(iter_limit=1000)
@@ -154,8 +154,8 @@ def test_mphsolver_on_halves():
 
 def test_mphsolver_on_strip_of_ones():
     """Run mpsolver on a strip of ones, 1/4 volume of total"""
-    l = 20
-    img = np.zeros([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.zeros([N, N, N]).reshape(1, N, N, N)
     x = 10
     img[:, :, 0:x, 0:x] = 1
     S = tau.MultiPhaseSolver(img, device=pt.device('cpu'))
@@ -164,11 +164,11 @@ def test_mphsolver_on_strip_of_ones():
 
 def test_mphsolver_on_strip_of_ones_and_twos():
     """Run solver on a strip of ones, 1/4 volume of total"""
-    l = 20
-    img = np.zeros([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.zeros([N, N, N]).reshape(1, N, N, N)
     x = 10
     img[:, :, 0:x, 0:x] = 1
-    img[:, :, 0:x, x:l] = 2
+    img[:, :, 0:x, x:N] = 2
     cond = {1: 1, 2: 0.5}
     S = tau.MultiPhaseSolver(img, cond, device=pt.device('cpu'))
     S.solve()
@@ -176,11 +176,11 @@ def test_mphsolver_on_strip_of_ones_and_twos():
 
 def test_mphsolver_on_strip_of_ones_and_twos_and_threes():
     """Run solver on a strip of ones, 1/4 volume of total"""
-    l = 20
-    img = np.ones([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.ones([N, N, N]).reshape(1, N, N, N)
     x = 10
     img[:, :, 0:x, 0:x] = 2
-    img[:, :, 0:x, x:l] = 3
+    img[:, :, 0:x, x:N] = 3
     cond = {1: 1, 2: 0.5, 3: 2}
     S = tau.MultiPhaseSolver(img, cond, device=pt.device('cpu'))
     S.solve()
@@ -190,8 +190,8 @@ def test_mphsolver_on_strip_of_ones_and_twos_and_threes():
 ###  Testing the tau_e solver
 def test_taue_deadend():
     """Run solver on a deadend strip of ones"""
-    l = 100
-    img = np.zeros((l, l))
+    N = 100
+    img = np.zeros((N, N))
     img[:75, 45:55] = 1
     img[img != 1] = 0
     esolver = tau.ElectrodeSolver(img, device=pt.device('cpu'))
@@ -201,8 +201,8 @@ def test_taue_deadend():
 
 def test_taue_throughpore():
     """Run taue solver on a strip of ones, 1/4 volume of total"""
-    l = 100
-    img = np.zeros((l, l))
+    N = 100
+    img = np.zeros((N, N))
     img[:, 45:55] = 1
     img[img != 1] = 0
     esolver = tau.ElectrodeSolver(img, device=pt.device('cpu'))

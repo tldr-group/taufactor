@@ -1,18 +1,14 @@
-#!/usr/bin/env python
-
 """Tests for `taufactor` package."""
 
 from taufactor.metrics import volume_fraction, specific_surface_area, triple_phase_boundary
-from tests.utils import *
 import numpy as np
 
 
 # Volume fraction
-
 def test_volume_fraction_on_uniform_block():
     """Run volume fraction on uniform block"""
-    l = 20
-    img = np.ones([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.ones([N, N, N]).reshape(1, N, N, N)
     vf = volume_fraction(img)['1']
 
     assert np.around(vf, decimals=5) == 1.0
@@ -20,8 +16,8 @@ def test_volume_fraction_on_uniform_block():
 
 def test_volume_fraction_on_empty_block():
     """Run volume fraction on empty block"""
-    l = 20
-    img = np.zeros([l, l, l]).reshape(1, l, l, l)
+    N = 20
+    img = np.zeros([N, N, N]).reshape(1, N, N, N)
     vf = volume_fraction(img)['0']
 
     assert np.around(vf, decimals=5) == 1.0
@@ -29,17 +25,19 @@ def test_volume_fraction_on_empty_block():
 
 def test_volume_fraction_on_checkerboard():
     """Run volume fraction on checkerboard block"""
-    l = 20
-    img = generate_checkerboard(l)
-    vf = volume_fraction(img, phases={'zeros': 0, 'ones': 1})
+    size = 20
+    cb = np.zeros([size, size, size])
+    a, b, c = np.meshgrid(range(size), range(size), range(size), indexing='ij')
+    cb[(a + b + c) % 2 == 0] = 1
+    vf = volume_fraction(cb, phases={'zeros': 0, 'ones': 1})
 
     assert (vf['zeros'], vf['ones']) == (0.5, 0.5)
 
 
 def test_volume_fraction_on_strip_of_ones():
     """Run volume fraction on strip of ones"""
-    l = 20
-    img = np.zeros([l, l, l])
+    N = 20
+    img = np.zeros([N, N, N])
     t = 10
     img[:, 0:t, 0:t] = 1
     vf = volume_fraction(img, phases={'zeros': 0, 'ones': 1})
@@ -49,8 +47,8 @@ def test_volume_fraction_on_strip_of_ones():
 
 def test_volume_fraction_on_multi_cubes():
     """Run surface area on multiple cubes"""
-    l = 20
-    img = np.zeros([l, l, l])
+    N = 20
+    img = np.zeros([N, N, N])
     img[0:10, 0:10, 0:5] = 1
     img[5:-5, 5:-5, 5:-5] = 2
     img[0:10, 0:10, 15:] = 1
@@ -64,8 +62,8 @@ def test_volume_fraction_on_multi_cubes():
 
 def test_surface_area_on_uniform_block():
     """Run surface area on uniform block"""
-    l = 20
-    img = np.ones([l, l, l])
+    N = 20
+    img = np.ones([N, N, N])
     sa_f = specific_surface_area(img, method='face_counting')['1']
     sa_g = specific_surface_area(img, method='gradient')['1']
     # Marchin cubes will not work unless there are non-uniform values
@@ -76,8 +74,8 @@ def test_surface_area_on_uniform_block():
 
 def test_surface_area_on_floating_cube():
     """Run surface area on floating cube"""
-    l = 20
-    img = np.zeros([l, l, l])
+    N = 20
+    img = np.zeros([N, N, N])
     x1, x2 = 5, 15
     img[x1:x2, x1:x2, x1:x2] = 1
     sa_f = specific_surface_area(img, method='face_counting')['1']
@@ -91,8 +89,8 @@ def test_surface_area_on_floating_cube():
 
 def test_surface_area_on_corner_cube():
     """Run surface area on corner cube"""
-    l = 20
-    img = np.zeros([l, l, l])
+    N = 20
+    img = np.zeros([N, N, N])
     img[0:10, 0:10, 0:10] = 1
     sa_f = specific_surface_area(img, method='face_counting')['1']
 
@@ -103,11 +101,11 @@ def test_surface_area_on_corner_cube():
 
 def test_surface_area_on_sphere():
     """Run surface area on sphere"""
-    l = 20
-    img = np.zeros([l, l, l])
-    radius = l*0.5-3
-    x, y, z = np.ogrid[:l, :l, :l]
-    distance_squared = (x - l/2 + 0.5)**2 + (y - l/2 + 0.5)**2 + (z - l/2 + 0.5)**2
+    N = 20
+    img = np.zeros([N, N, N])
+    radius = N*0.5-3
+    x, y, z = np.ogrid[:N, :N, :N]
+    distance_squared = (x - N/2 + 0.5)**2 + (y - N/2 + 0.5)**2 + (z - N/2 + 0.5)**2
     mask = distance_squared <= radius**2
     img[mask] = 1
     a_theo = 4*np.pi*radius**2/img.size
@@ -124,8 +122,8 @@ def test_surface_area_on_sphere():
 
 def test_surface_area_on_multi_cubes():
     """Run surface area on multiple cubes"""
-    l = 20
-    img = np.zeros([l, l, l])
+    N = 20
+    img = np.zeros([N, N, N])
     img[0:10, 0:10, 0:5] = 1
     img[5:-5, 5:-5, 5:-5] = 2
     img[0:10, 0:10, 15:] = 1
@@ -147,19 +145,18 @@ def test_surface_area_on_multi_cubes():
 
 def test_tpb_2d():
     """Run tpb on 3x3"""
-    l = 3
-    img = np.zeros([l, l])
+    N = 3
+    img = np.zeros([N, N])
     img[0] = 1
     img[:, 0] = 2
     tpb = triple_phase_boundary(img)
     assert tpb == 0.25
 
 
-def test_tpb_3d_corners():
-    """Run tpb on 2x2"""
-
-    l = 2
-    img = np.zeros([l, l, l])
+def test_tpb_3d():
+    """Run tpb on 2x2x2"""
+    N = 2
+    img = np.zeros([N, N, N])
     img[0, 0, 0] = 1
     img[1, 1, 1] = 1
     img[0, 1, 1] = 2
@@ -169,10 +166,9 @@ def test_tpb_3d_corners():
 
 
 def test_tpb_3d_corners():
-    """Run tpb on 2x2 corners"""
-
-    l = 2
-    img = np.zeros([l, l, l])
+    """Run tpb on 2x2x2 corners"""
+    N = 2
+    img = np.zeros([N, N, N])
     img[0] = 1
     img[:, 0] = 2
     tpb = triple_phase_boundary(img)
