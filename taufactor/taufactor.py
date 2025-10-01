@@ -6,20 +6,21 @@ import matplotlib.pyplot as plt
 import psutil
 try:
     import torch
-except ImportError:
-    raise ImportError("Pytorch is required to use this package. Please install pytorch and try again. More information about TauFactor's requirements can be found at https://taufactor.readthedocs.io/en/latest/")
+except Exception:
+    torch = None
 import warnings
-from .metrics import extract_through_feature
+
 
 class BaseSolver:
+    """Base solver class to handle common functionality for solvers."""
+
     def __init__(self, img, bc=(-0.5, 0.5), device='cuda'):
-        """
-        Base solver class to handle common functionality for different solvers.
-        Args:
-            img: labelled input image defining (non-)conducting phases.
-            bc: Boundary conditions applied at top and bottom of domain.
-            device: The device to perform computations ('cpu' or 'cuda').
-        """
+        if torch is None:
+            raise ImportError(
+                "PyTorch is required to use TauFactor solvers. Install pytorch following "
+                "https://taufactor.readthedocs.io/en/latest/installation.html"
+            )
+
         if not isinstance(img, np.ndarray):
             raise TypeError("Error: input image must be a NumPy array!")
         if img.ndim == 2:
@@ -37,7 +38,9 @@ class BaseSolver:
         if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
             self.device = torch.device('cpu')
             warnings.warn(
-                "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
+                "CUDA not available, defaulting device to cpu. "
+                "To avoid this warning, explicitly set device='cpu'"
+            )
         # save original image in cuda
         img = torch.tensor(img, dtype=self.precision, device=self.device)
 
@@ -63,8 +66,15 @@ class BaseSolver:
         img = None
 
     def init_cb(self, img):
-        """Creates a chequerboard to ensure neighbouring pixels dont update,
-        which can cause instability"""
+        """Create a checkerboard over-relaxation mask for SOR.
+
+        Args:
+            img (torch.Tensor): Batched 3D tensor of the working image.
+
+        Returns:
+            list[torch.Tensor]: Two masks (even/odd slices), each shaped
+            like the spatial volume.
+        """
         _, x, y, z = img.shape
         cb = np.zeros([x, y, z])
         a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
@@ -73,11 +83,22 @@ class BaseSolver:
         return [torch.roll(torch.tensor(cb, dtype=self.precision, device=self.device), sh, 0) for sh in [0, 1]]
 
     def solve(self):
-        """Solve given PDE"""
+        """Run solver"""
         raise NotImplementedError("You're trying to call the solve function on the generalized BaseSolver class")
 
     def pad(self, img, vals=[0] * 6):
-        """Pads a volume with values"""
+        """Pad a 3D volume with constant boundary values.
+
+        Pads one voxel on each face and sets face values from ``vals``.
+
+        Args:
+            img (torch.Tensor): Batched 3D tensor ``[B, X, Y, Z]``.
+            vals (list[float], optional): Six boundary values in order
+                ``[x0, x1, y0, y1, z0, z1]``. Defaults to six zeros.
+
+        Returns:
+            torch.Tensor: Padded tensor with shape ``[B, X+2, Y+2, Z+2]``.
+        """
         while len(vals) < 6:
             vals.append(0)
         to_pad = [1]*8
@@ -89,10 +110,37 @@ class BaseSolver:
         return img
 
     def crop(self, img, c=1):
-        """removes a layer from the volume edges"""
+        """Crop a uniform margin from all faces.
+
+        Args:
+            img (torch.Tensor): Batched 3D tensor.
+            c (int, optional): Number of voxels to remove from each face.
+                Defaults to ``1``.
+
+        Returns:
+            torch.Tensor: Cropped tensor.
+        """
         return img[:, c:-c, c:-c, c:-c]
 
     def check_vertical_flux(self, conv_crit):
+        """Assess vertical flux uniformity as a convergence proxy.
+
+        Computes per-slice vertical flux, flags convergence per batch, and
+        returns diagnostics.
+
+        Args:
+            conv_crit (float): Tolerance for relative flux variation across
+                slices.
+
+        Returns:
+            tuple:
+                flags (list[str]): One of ``{"converged","not_converged","zero_flux"}`` per batch.
+                mean_fl (torch.Tensor): Mean flux per batch ``[B]``.
+                err (torch.Tensor): Relative spread per batch ``[B]``.
+                fl (torch.Tensor): Slice-resolved flux ``[B, X]``.
+        """
+        from .metrics import extract_through_feature
+
         vert_flux = self.calc_vertical_flux()
         # Sum over the y and z dimensions only, leaving a (bs, x) result.
         fl = torch.sum(vert_flux, (2, 3)) # (bs, x)
@@ -119,11 +167,11 @@ class BaseSolver:
                     flags.append("not_converged")
         return flags, mean_fl, err, fl
 
-    def check_rolling_mean(self, conv_crit):
+    def _check_rolling_mean(self, conv_crit):
         err = (self.new_fl - self.old_fl) / (self.new_fl + self.old_fl)
         return torch.max(err) < conv_crit
 
-    def end_simulation(self, iter_limit, verbose, start):
+    def _end_simulation(self, iter_limit, verbose, start):
         converged = 'converged to'
         if self.iter >= iter_limit:
             print('Warning: not converged')
@@ -142,21 +190,31 @@ class BaseSolver:
 
 
 class Solver(BaseSolver):
-    """
-    Default solver for two phase images. Once solve method is
-    called, tau, D_eff and D_rel are available as attributes.
+    """Two-phase (binary) SOR solver.
+
+    Solves steady-state potential/diffusion on a binary microstructure
+    (1 = conductive, 0 = non-conductive) using a Jacobi-like SOR sweep
+    with alternating checkerboards. Reports batchwise tortuosity and
+    effective diffusivity.
+
+    Args:
+        img (numpy.ndarray): Binary image with labels in ``{0, 1}``.
+        bc (tuple[float, float], optional): Boundary values
+            ``(top_bc, bot_bc)``. Defaults to ``(-0.5, 0.5)``.
+        D_0 (float, optional): Reference (mean) diffusivity. Defaults to ``1``.
+        device (str | torch.device, optional): Compute device. Defaults to ``'cuda'``.
+
+    Attributes:
+        D_0 (float): Reference diffusivity.
+        D_mean (float | None): Mean diffusivity used for scaling.
+        VF (numpy.ndarray): Volume fraction per batch element.
+        D_rel (numpy.ndarray): Relative diffusivity per batch (set during solve).
+
+    Raises:
+        ValueError: If labels are not strictly in ``{0, 1}``.
     """
 
     def __init__(self, img, bc=(-0.5, 0.5), D_0=1, device='cuda'):
-        """
-        Initialise parameters, conc map and other tools that can be re-used
-        for multiple solves.
-
-        :param img: input img with 1s conductive and 0s non-conductive
-        :param bc: Upper and lower boundary conditions. Leave as default.
-        :param D_0: reference material diffusivity
-        :param device: pytorch device, can be cuda or cpu 
-        """
         super().__init__(img, bc, device)
         self.D_0 = D_0
         self.D_mean = None
@@ -233,7 +291,7 @@ class Solver(BaseSolver):
                 self.iter += 1
             self.D_mean = self.D_0
             self.D_eff = self.D_mean*self.D_rel
-            self.end_simulation(iter_limit, verbose, start)
+            self._end_simulation(iter_limit, verbose, start)
             return self.tau
 
     def check_convergence(self, verbose, conv_crit, plot_interval):
@@ -274,7 +332,7 @@ class Solver(BaseSolver):
 
         overall_converged = all(flag == "converged" for flag in flags)
         if overall_converged:
-            self.converged = self.check_rolling_mean(conv_crit=1e-3)
+            self.converged = self._check_rolling_mean(conv_crit=1e-3)
 
             if not self.converged:
                 self.old_fl = self.new_fl
@@ -296,8 +354,28 @@ class Solver(BaseSolver):
 
 
 class AnisotropicSolver(Solver):
-    """
-    Anisotropic Solver e.g. for FIB-SEM datsets where spacing in cutting direction it different from pixel resolution
+    """Anisotropic SOR solver with voxel-spacing corrections.
+
+    Scales neighbour contributions to account for non-cubic voxels such
+    as in FIB-SEM stacks (different spacing in cutting direction).
+    Y-neighbors are scaled by ``(dx/dy)^2`` and Z-neighbors by
+    ``(dx/dz)^2``.
+
+    Args:
+        img (numpy.ndarray): Binary input image.
+        spacing (tuple[float, float, float]): Voxel spacing ``(dx, dy, dz)``.
+        bc (tuple[float, float], optional): Boundary values.
+            Defaults to ``(-0.5, 0.5)``.
+        D_0 (float, optional): Reference diffusivity. Defaults to ``1``.
+        device (str | torch.device, optional): Compute device. Defaults to ``'cuda'``.
+
+    Attributes:
+        Ky (float): Anisotropy weight for Y neighbors (``(dx/dy)^2``).
+        Kz (float): Anisotropy weight for Z neighbors (``(dx/dz)^2``).
+
+    Raises:
+        ValueError: If ``spacing`` is not a length-3 numeric tuple.
+        UserWarning: If spacing anisotropy is very large.
     """
 
     def __init__(self, img, spacing, bc=(-0.5, 0.5), D_0=1, device='cuda'):
@@ -361,17 +439,20 @@ class AnisotropicSolver(Solver):
                 self.iter += 1
             self.D_mean = self.D_0
             self.D_eff = self.D_mean*self.D_rel
-            self.end_simulation(iter_limit, verbose, start)
+            self._end_simulation(iter_limit, verbose, start)
             return self.tau
 
 
 class PeriodicSolver(Solver):
-    """
-    Solver with periodic boundary conditions in y and z direction.
-    Only differences to the standard solver are the
-     - neighbour matrix accounting for conductive neighbours on the other side and
-     - the function to apply boundary conditions 
-    Once solve method is called, tau, D_eff and D_rel are available as attributes.
+    """Two-phase SOR solver with periodic Y/Z boundaries.
+
+    Uses periodic wrapping for neighbor evaluation in Y and Z and
+    reapplies periodic boundary conditions to the field each iteration.
+    X remains the flux/open direction.
+
+    Notes:
+        Overrides ``init_nn`` and ``apply_boundary_conditions`` from
+        :class:`Solver`.
     """
 
     def init_nn(self, img):
@@ -395,21 +476,35 @@ class PeriodicSolver(Solver):
 
 
 class MultiPhaseSolver(BaseSolver):
-    """
-    Multi=phase solver for two phase images. Once solve method is
-    called, tau, D_eff and D_rel are available as attributes.
+    """Multi-phase SOR solver with per-phase conductivities.
+
+    Supports multiple conductive labels with different conductivities
+    and uses harmonic-mean pair weights in the update stencil. Currently
+    implemented for batch size of 1.
+
+    Args:
+        img (numpy.ndarray): Labeled image; 0 = non-conductive.
+        cond (dict[int, float], optional): Map ``label -> conductivity``.
+            Defaults to ``{1: 1}``.
+        bc (tuple[float, float], optional): Boundary values.
+            Defaults to ``(-0.5, 0.5)``.
+        device (str | torch.device, optional): Compute device. Defaults to ``'cuda'``.
+
+    Attributes:
+        cond (dict[int, float]): Internal map of label to resistance half-weights.
+        pre_factors (list[torch.Tensor]): Directional pre-factors for the stencil.
+        VF (dict[int, float]): Volume fraction per label.
+        D_mean (float): Phase-weighted mean diffusivity.
+        D_eff (torch.Tensor | float | None): Effective diffusivity.
+        tau (torch.Tensor | float | None): Tortuosity.
+
+    Raises:
+        ValueError: If conductivity for any label is 0, or if label 0
+            is included as conductive.
+        TypeError: If batch size is greater than 1.
     """
 
     def __init__(self, img, cond={1: 1}, bc=(-0.5, 0.5), device='cuda'):
-        """
-        Initialise parameters, conc map and other tools that can be re-used
-        for multiple solves.
-
-        :param img: input img with n conductive phases labelled as integers, and 0s for non-conductive
-        :param cond: dict with n phase labels as keys, and their corresponding conductivities as values e.g
-        for a 2 phase material, {1:0.543, 2: 0.420}, with 1s and 2s in the input img
-        :param bc: Upper and lower boundary conditions. Leave as default.
-        """
         if (0 in cond.values()):
             raise ValueError(
                 '0 conductivity phase: non-conductive phase should be labelled 0 in the input image and ommitted from the cond argument')
@@ -510,7 +605,7 @@ class MultiPhaseSolver(BaseSolver):
             self.conc[:, 1:-1, 1:-1, 1:-1] += out
             self.iter += 1
 
-        self.end_simulation(iter_limit, verbose, start)
+        self._end_simulation(iter_limit, verbose, start)
         return self.tau
 
     def check_convergence(self, verbose, conv_crit):
@@ -528,7 +623,7 @@ class MultiPhaseSolver(BaseSolver):
                 f'Iter: {self.iter}, conv error: {abs(err[0].item())}, tau: {self.tau.item()}')
 
         if semi_converged[0]:
-            self.converged = self.check_rolling_mean(conv_crit=1e-3)
+            self.converged = self._check_rolling_mean(conv_crit=1e-3)
 
             if not self.converged:
                 self.old_fl = self.new_fl[0]
@@ -561,13 +656,46 @@ class MultiPhaseSolver(BaseSolver):
 
 
 class ElectrodeSolver():
-    """
-    Electrode Solver - solves the electrode tortuosity factor system (migration and capacitive current between current collector and solid/electrolyte interface)
-    Once solve method is called, tau, D_eff and D_rel are available as attributes.
+    """AC electrode tortuosity solver (migration + capacitive current).
+
+    Solves a complex-valued potential field under sinusoidal excitation
+    with a closed (zero-flux) right boundary, using an SOR-like update
+    and frequency-dependent prefactors. Reports the electrode
+    tortuosity from boundary current.
+
+    Args:
+        img (numpy.ndarray): 2D or 3D binary image; internally batched.
+        omega (float, optional): Angular frequency of excitation.
+            Defaults to ``1e-6``.
+        device (str | torch.device, optional): Compute device.
+            Defaults to ``'cuda'``.
+
+    Attributes:
+        omega (float): Angular excitation frequency.
+        res (float): Series resistance coefficient.
+        c_DL (float): Double-layer capacitance coefficient.
+        A_CC (int): Current-collector interfacial area.
+        k_0 (float): Scaling constant for normalization.
+        VF (float): Volume fraction of the conductive phase.
+        img (torch.Tensor): Working image on device.
+        phi (torch.Tensor): Complex potential field (padded).
+        phase_map (torch.Tensor): Padded binary phase mask.
+        prefactor (torch.Tensor): Complex update prefactors.
+        w (float): Over-relaxation factor.
+        cb (list[torch.Tensor]): Checkerboard masks.
+        converged (bool): Global convergence flag.
+        semiconverged (float | bool): Stage convergence tracker.
+        iter (int): Iteration counter.
+        tau_e (float | torch.Tensor): Electrode tortuosity estimate.
+        D_eff (float | None): Placeholder; not central to AC solve.
+        D_mean (float | None): Placeholder; not central to AC solve.
+
+    Notes:
+        This class is standalone (does not inherit from :class:`BaseSolver`)
+        due to its complex-valued field and AC-specific update scheme.
     """
 
     def __init__(self, img, omega=1e-6, device='cuda'):
-
         img = np.expand_dims(img, 0)
         self.cpu_img = img
         self.precision = torch.double
@@ -731,7 +859,7 @@ class ElectrodeSolver():
                 if self.tau_es[-1] > 1e-5:
                     if abs(self.semiconverged - self.tau_es[-1]) < self.conv_crit_2:
                         self.tau_e = self.tau_es[-1]
-                        self.end_simulation()
+                        self._end_simulation()
                         return True
                 else:
                     self.phi = self.init_phi(self.img)
@@ -801,9 +929,9 @@ class ElectrodeSolver():
 
             self.iter += 1
         # self.tau_e = self.tau_es[-1]
-        # self.end_simulation(iter_limit, verbose, start)
+        # self._end_simulation(iter_limit, verbose, start)
 
-    def end_simulation(self, ):
+    def _end_simulation(self, ):
         if self.iter == self.iter_limit - 1:
             print('Warning: not converged')
             converged = 'unconverged value of tau'
