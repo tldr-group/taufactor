@@ -29,8 +29,11 @@ autodoc_mock_imports = [
     'psutil',
     'IPython',
     'numpy',
+    'scipy',
+    'skimage',
     'torch'
 ]
+
 master_doc = 'index'
 exclude_patterns = ['paper/*', '_build', 'Thumbs.db', '.DS_Store']
 
