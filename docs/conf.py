@@ -28,6 +28,7 @@ autodoc_mock_imports = [
     'pyvista',
     'psutil',
     'IPython',
+    'numpy',
     'torch'
 ]
 master_doc = 'index'
