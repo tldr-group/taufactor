@@ -2,8 +2,6 @@
 
 ## 1.2.0 (2025-02-10)
 
----
-
 - Add paper to README 
 - Exit solve after iter_limit reached (wasn't enforced before) by @amirDahari1 in #96
 - Change error for negative flux (changed stop criteria) resolves #94 by @amirDahari1 in #95
@@ -14,18 +12,18 @@
 - New surface areas (face counting, gradient and marching cubes) by @daubners in #107
 - Through connectivity (checks if there's phase connectivity) by @daubners in #106
 
-## 1.1.0 (2023-07-24)
-
 ---
+
+## 1.1.0 (2023-07-24)
 
 -   Added comments from reviewers
 -   Added examples to documentation
 -   Added API documentation
 -   Fix test times on comparison
 
-## 1.0.0 (2023-03-23)
-
 ---
+
+## 1.0.0 (2023-03-23)
 
 -   Migrated to PyTorch from CuPy
 -   New convergence criteria
@@ -33,35 +31,35 @@
 -   CI testing
 -   Includes TauFactor paper
 
-## 0.1.4 (2022-07-11)
-
 ---
+
+## 0.1.4 (2022-07-11)
 
 -   Add TauE solver
 -   Add triple phase boundary calculations
 -   Fix cuboids not converging
 -   Fix convergence messaging
 
-## 0.1.3 (2021-03-25)
-
 ---
+
+## 0.1.3 (2021-03-25)
 
 -   Hotfix code in taufactor.py
 
-## 0.1.2 (2021-03-25)
-
 ---
+
+## 0.1.2 (2021-03-25)
 
 -   Added multi-phase and periodic solvers and metrics calculations
 
-## 0.1.1 (2021-02-10)
-
 ---
+
+## 0.1.1 (2021-02-10)
 
 -   Removed CuPy from requirements and added installation instructions to README
 
-## 0.1.0 (2021-02-08)
-
 ---
+
+## 0.1.0 (2021-02-08)
 
 -   First release on PyPI.

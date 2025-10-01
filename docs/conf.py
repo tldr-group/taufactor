@@ -2,22 +2,16 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('..'))
 
-import taufactor
-
 project = 'taufactor'
 copyright = "2023, tldr group"
 author = "tldr group"
-
-# The short X.Y version.
-version = taufactor.__version__
-# The full version, including alpha/beta/rc tags.
-release = taufactor.__version__
 
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.mathjax',
     'sphinx.ext.autosummary',
     'sphinx.ext.napoleon',
+    'sphinx.ext.viewcode',
     'myst_parser',
     'nbsphinx',
 ]
@@ -34,11 +28,10 @@ autodoc_mock_imports = [
     'pyvista',
     'psutil',
     'IPython',
-    'numpy',
     'torch'
 ]
 master_doc = 'index'
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ['paper/*', '_build', 'Thumbs.db', '.DS_Store']
 
 autodoc_default_options = {
     'members': True,
