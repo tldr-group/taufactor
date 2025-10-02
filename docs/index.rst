@@ -7,7 +7,7 @@ Welcome to TauFactor's documentation!
 
    readme
    installation
-   usage
+   notebooks/00-overview.ipynb
    api
    contributing
    authors
