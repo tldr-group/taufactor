@@ -131,7 +131,7 @@ class SORSolver(ABC):
                     ax.plot(x, taus[:,b], label=f'batch_{b}', linestyle='-')
                 ax.set_xlabel('iters')
                 ax.set_ylabel('tau')
-                ax.set_title(f'Tau convergence')
+                ax.set_title('Tau convergence')
                 ax.set_ylim(np.min(taus)-0.1, np.max(taus)+0.1)
                 ax.legend()
                 ax.grid()
@@ -191,8 +191,10 @@ class SORSolver(ABC):
     def _expand_to_4d(img: np.ndarray) -> np.ndarray:
         if not isinstance(img, np.ndarray):
             raise TypeError("Error: input image must be a NumPy array!")
-        if img.ndim == 2: img = img[..., None]
-        if img.ndim == 3: img = img[None, ...]
+        if img.ndim == 2:
+            img = img[..., None]
+        if img.ndim == 3:
+            img = img[None, ...]
         if img.ndim != 4:
             raise ValueError("expected [B, X, Y, Z]")
         return img
