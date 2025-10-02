@@ -204,8 +204,8 @@ class SORSolver(ABC):
         # check device is available
         if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
             device = torch.device('cpu')
-            warnings.warn("CUDA not available, defaulting device to cpu. ",
-                          "To avoid this warning, explicitly set the device when ",
+            warnings.warn("CUDA not available, defaulting device to cpu. "
+                          "To avoid this warning, explicitly set the device when "
                           "initialising the solver with device='cpu' ")
         else:
             device = torch.device(device)
