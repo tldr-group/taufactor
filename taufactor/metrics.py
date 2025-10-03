@@ -137,12 +137,13 @@ def _gaussian_kernel_3d_numpy(size=3, sigma=1.0):
 
 def specific_surface_area(
     img,
-    spacing=(1,1,1),
-    phases={},
-    method='gradient',
-    device='cuda',
-    smoothing=True,
-    verbose=False
+    spacing = (1,1,1),
+    phases = {},
+    method = 'gradient',
+    periodic = [False,False,False],
+    device = 'cuda',
+    smoothing = True,
+    verbose = False
 ):
     """Compute specific surface area per phase.
 
@@ -181,7 +182,8 @@ def specific_surface_area(
     if torch is None:
         raise ImportError("PyTorch is required.")
 
-    [dx,dy,dz] = spacing
+    dx, dy, dz = spacing
+    nx, ny, nz = img.shape
     surface_areas = {}
 
     device = torch.device(device)
@@ -190,11 +192,10 @@ def specific_surface_area(
         warnings.warn("CUDA not available, defaulting device to cpu.")
 
     if (method == 'gradient') | (method == 'face_counting'):
-        if type(img) is not type(torch.tensor(1)):
-            tensor = torch.tensor(img)
-        else:
-            tensor = img
-        tensor = tensor.to(device)
+        tensor = (img if isinstance(img, torch.Tensor)
+                  else torch.as_tensor(img)).to(device)
+        if len(torch.unique(tensor)) == 1:
+            return {str(tensor[0,0,0].int().item()): 0.0}
     
     if (verbose) and (device.type == 'cuda'):
         torch.cuda.reset_peak_memory_stats(device=device)
@@ -224,39 +225,36 @@ def specific_surface_area(
             surface_areas[name] = surface_area / volume
 
     elif method == 'face_counting':
-        # TODO: treat dimensions such that dx!=dz is accounted for
         tensor = tensor.to(torch.int32)
-        if len(torch.unique(tensor)) == 1:
-            surface_areas = {str(tensor[0,0,0].int().item()): 0.0}
+        max_label = int(tensor.max().item())
+        area_per_label = torch.zeros(max_label + 1, dtype=torch.float64, device=tensor.device)
+        volume = (nx * ny * nz) * (dx * dy * dz)
+
+        def sum_facing_neighbours(a: torch.Tensor, b: torch.Tensor, face_area: float) -> None:
+            idx = (a != b)
+            if idx.any():
+                counts = torch.bincount(a[idx], minlength=max_label + 1)
+                counts += torch.bincount(b[idx], minlength=max_label + 1)
+                area_per_label[: counts.shape[0]] += face_area * counts.to(torch.float64)
+
+        sum_facing_neighbours(tensor[1:, :, :], tensor[:-1, :, :], dy*dz)
+        sum_facing_neighbours(tensor[:, 1:, :], tensor[:, :-1, :], dx*dz)
+        sum_facing_neighbours(tensor[:, :, 1:], tensor[:, :, :-1], dx*dy)
+
+        # Periodic wrap faces (compare the two boundary slabs)
+        if periodic[0]:
+            sum_facing_neighbours(tensor[0, :, :], tensor[-1, :, :], dy*dz)
+        if periodic[1]:
+            sum_facing_neighbours(tensor[:, 0, :], tensor[:, -1, :], dx*dz)
+        if periodic[2]:
+            sum_facing_neighbours(tensor[:, :, 0], tensor[:, :, -1], dx*dy)
+
+        if phases=={}:
+            labels = torch.unique(tensor).tolist()
+            surface_areas = {str(int(lbl)): (area_per_label[int(lbl)].item() / volume) for lbl in labels}
         else:
-            volume = torch.numel(tensor)*dx
-            phasepairs = torch.tensor([[0,0]], device=device)
-
-            neighbour_idx = torch.nonzero(tensor[:-1,:,:] != tensor[1:,:,:], as_tuple=True)
-            neighbour_list = torch.stack([tensor[:-1,:,:][neighbour_idx], tensor[1:,:,:][neighbour_idx]])
-            phasepairs = torch.cat((phasepairs,torch.transpose(neighbour_list,0,1)), 0)
-            neighbour_idx = torch.nonzero(tensor[:,:-1,:] != tensor[:,1:,:], as_tuple=True)
-            neighbour_list = torch.stack([tensor[:,:-1,:][neighbour_idx], tensor[:,1:,:][neighbour_idx]])
-            phasepairs = torch.cat((phasepairs,torch.transpose(neighbour_list,0,1)), 0)
-            neighbour_idx = torch.nonzero(tensor[:,:,:-1] != tensor[:,:,1:], as_tuple=True)
-            neighbour_list = torch.stack([tensor[:,:,:-1][neighbour_idx], tensor[:,:,1:][neighbour_idx]])
-            phasepairs = torch.cat((phasepairs,torch.transpose(neighbour_list,0,1)), 0)
-
-            # Crop initial dummy values
-            phasepairs = phasepairs[1:]
-
-            if phases=={}:
-                if phasepairs == {}:
-                    surface_areas
-                labels, counts = torch.unique(phasepairs, return_counts=True)
-                labels = labels.int()
-                counts = counts.float()
-                counts /= volume
-                surface_areas = {str(label.item()): counts[i].item() for i, label in enumerate(labels)}
-            else:
-                for name, label in phases.items():
-                    count = torch.sum((phasepairs == label).int()).item()
-                    surface_areas[name] = count / volume
+            for name, label in phases.items():
+                surface_areas[name] = area_per_label[int(label)].item()  / volume
 
     elif method == 'marching_cubes':
         if device.type != 'cpu':
@@ -282,15 +280,19 @@ def specific_surface_area(
                 sub_array = convolve(sub_array, gaussian, mode='nearest')
             vertices, faces, _, _ = measure.marching_cubes(sub_array, 0.5, method='lewiner')
             surface_area = measure.mesh_surface_area(vertices, faces)
-            surface_areas[name] = surface_area/volume
+            surface_areas[name] = float(surface_area/volume)
 
     else:
-        raise ValueError("Choose method\n 'gradient' for fast phase-field approach\n 'face_counting' for face counting or\n 'marching_cubes' for marching cubes method.")
+        raise ValueError("Choose method\n "
+                         "'gradient' for fast phase-field approach\n "
+                         "'face_counting' for face counting or\n "
+                         "'marching_cubes' for marching cubes method.")
     
     if verbose:
         if device.type == 'cuda':
-            print(f"GPU-RAM currently allocated {torch.cuda.memory_allocated(device=device) / 1e6:.2f} MB ({torch.cuda.memory_reserved(device=device) / 1e6:.2f} MB reserved)")
-            print(f"GPU-RAM maximally allocated {torch.cuda.max_memory_allocated(device=device) / 1e6:.2f} MB ({torch.cuda.max_memory_reserved(device=device) / 1e6:.2f} MB reserved)")
+            print(f"GPU-RAM currently {torch.cuda.memory_allocated(device=device) / 1e6:.2f} MB "
+                  f"(max allocated {torch.cuda.max_memory_allocated(device=device) / 1e6:.2f} MB; "
+                  f"{torch.cuda.max_memory_reserved(device=device) / 1e6:.2f} MB reserved)")
         elif device.type == 'cpu':
             memory_info = psutil.virtual_memory()
             print(f"CPU total memory: {memory_info.total / 1e6:.2f} MB")
@@ -298,6 +300,86 @@ def specific_surface_area(
             print(f"CPU used memory: {memory_info.used / 1e6:.2f} MB")
 
     return surface_areas
+
+
+def interfacial_areas(
+    img,
+    spacing = (1,1,1),
+    method = 'face_counting',
+    periodic = [False,False,False],
+    normalize = True,
+    device = 'cuda',
+    smoothing = True,
+    verbose = False
+):
+    if torch is None:
+        raise ImportError("PyTorch is required.")
+
+    dx, dy, dz = spacing
+    nx, ny, nz = img.shape
+
+    device = torch.device(device)
+    if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
+        device = torch.device('cpu')
+        warnings.warn("CUDA not available, defaulting device to cpu.")
+
+
+    tensor = (img if isinstance(img, torch.Tensor)
+                  else torch.as_tensor(img)).to(device)
+    if len(torch.unique(tensor)) == 1:
+        return {str(tensor[0,0,0].int().item()): 0.0}
+    
+    if (verbose) and (device.type == 'cuda'):
+        torch.cuda.reset_peak_memory_stats(device=device)
+
+    if method == 'face_counting':
+
+        def add_phasepairs(a: torch.Tensor, b: torch.Tensor, phasepairs) -> None:
+            idx = (a != b)
+            if idx.any():
+                neighbours = torch.stack([a[idx], b[idx]])
+                phasepairs = torch.cat((phasepairs, torch.transpose(neighbours, 0, 1)), 0)
+            return phasepairs
+
+        tensor = tensor.to(torch.int32)
+        phasepairs = torch.tensor([[0,0]], device=device)
+        phasepairs = add_phasepairs(tensor[:-1, :, :], tensor[1:, :, :], phasepairs)
+        phasepairs = add_phasepairs(tensor[: ,:-1, :], tensor[:, 1:, :], phasepairs)
+        phasepairs = add_phasepairs(tensor[:, :, :-1], tensor[:, :, 1:], phasepairs)
+
+        # Periodic wrap faces (compare the two boundary slabs)
+        if periodic[0]:
+            phasepairs = add_phasepairs(tensor[0, :, :], tensor[-1, :, :], phasepairs)
+        if periodic[1]:
+            phasepairs = add_phasepairs(tensor[:, 0, :], tensor[:, -1, :], phasepairs)
+        if periodic[2]:
+            phasepairs = add_phasepairs(tensor[:, :, 0], tensor[:, :, -1], phasepairs)
+
+        # Crop initial dummy values
+        phasepairs = phasepairs[1:]
+        phasepairs, _ = torch.sort(phasepairs, dim=1)
+        pairs, counts = torch.unique(phasepairs, return_counts=True, dim=0)
+        counts = counts.to(torch.float64)
+        if normalize:
+            volume = (nx * ny * nz) * (dx * dy * dz)
+            counts = counts / volume
+        interfacial_areas = {(int(pairs[i][0]), int(pairs[i][1])): float(counts[i]) for i in range(pairs.shape[0])}
+    
+    else:
+        raise ValueError("Only method='face_counting' implemented for now.")
+    
+    if verbose:
+        if device.type == 'cuda':
+            print(f"GPU-RAM currently {torch.cuda.memory_allocated(device=device) / 1e6:.2f} MB "
+                      f"(max allocated {torch.cuda.max_memory_allocated(device=device) / 1e6:.2f} MB; "
+                      f"{torch.cuda.max_memory_reserved(device=device) / 1e6:.2f} MB reserved)")
+        elif device.type == 'cpu':
+            memory_info = psutil.virtual_memory()
+            print(f"CPU total memory: {memory_info.total / 1e6:.2f} MB")
+            print(f"CPU available memory: {memory_info.available / 1e6:.2f} MB")
+            print(f"CPU used memory: {memory_info.used / 1e6:.2f} MB")
+
+    return interfacial_areas
 
 
 def triple_phase_boundary(img):
