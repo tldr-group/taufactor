@@ -8,6 +8,7 @@ Welcome to TauFactor's documentation!
    readme
    installation
    notebooks/00-overview.ipynb
+   notebooks/02-surface-areas.ipynb
    api
    contributing
    authors
