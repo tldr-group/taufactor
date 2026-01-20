@@ -193,18 +193,15 @@ def test_taue_deadend():
     N = 100
     img = np.zeros((N, N))
     img[:75, 45:55] = 1
-    img[img != 1] = 0
-    esolver = tau.ElectrodeSolver(img, device=pt.device('cpu'))
+    esolver = tau.ImpedanceSolver(img, device=pt.device('cpu'))
     esolver.solve()
-    assert np.around(esolver.tau_e, 3) == 0.601
-
+    assert np.around(esolver.tau, 3) == 0.594
 
 def test_taue_throughpore():
     """Run taue solver on a strip of ones, 1/4 volume of total"""
     N = 100
     img = np.zeros((N, N))
     img[:, 45:55] = 1
-    img[img != 1] = 0
-    esolver = tau.ElectrodeSolver(img, device=pt.device('cpu'))
+    esolver = tau.ImpedanceSolver(img, device=pt.device('cpu'))
     esolver.solve()
-    assert np.around(esolver.tau_e, 3) == 1.046
+    assert np.around(esolver.tau, 3) == 0.986
