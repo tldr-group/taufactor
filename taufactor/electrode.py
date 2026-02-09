@@ -1,14 +1,12 @@
 """Main module."""
 from IPython.display import clear_output
 import numpy as np
-import psutil
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 try:
     import torch
-except ImportError:
-    raise ImportError("Pytorch is required to use this package. Please install pytorch and try again. More information about TauFactor's requirements can be found at https://taufactor.readthedocs.io/en/latest/")
-import warnings
+except Exception:
+    torch = None
 from .taufactor import SORSolver
 from .utils import compute_impedance, compute_impedance_batched
 
@@ -18,7 +16,7 @@ class ElectrodeSolver(SORSolver):
     called, tau, D_eff and D_rel are available as attributes.
     """
     def __init__(self, img, conductive_label=1, reactive_label=0, \
-                 omega=None, spacing=None, device=torch.device('cuda')):
+                 omega=None, spacing=None, device='cuda'):
         """
         Initialise parameters, solution field and other tools that can be re-used
         for multiple solves.
