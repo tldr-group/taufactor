@@ -354,25 +354,29 @@ class Solver(SORSolver):
         fl_max = np.max(self.flux_1d, axis=1)  # shape: (bs,)
         fl_min = np.min(self.flux_1d, axis=1)  # shape: (bs,)
         mean_fl = np.mean(self.flux_1d, axis=1)   # shape: (bs,)
-        relative_error = (fl_max - fl_min) / fl_max
+        relative_error = np.divide(fl_max - fl_min, fl_max,
+            out=np.full_like(fl_max, np.nan), where=fl_max != 0)
 
         self.D_rel = mean_fl * self.Nx / (self.Ny * self.Nz)\
                      / abs(self.top_bc - self.bot_bc)
-        tau = self.VF / self.D_rel
+        tau = np.divide(self.VF, self.D_rel,
+            out=np.full_like(self.D_rel, np.nan), where=self.D_rel != 0)
 
         fluxes = -self.field[:, 2:-1, 1:-1, 1:-1] + self.field[:, 1:-2, 1:-1, 1:-1]
         fluxes[self.field[:, 2:-1, 1:-1, 1:-1] == 0] = 0
         fluxes[self.field[:, 1:-2, 1:-1, 1:-1] == 0] = 0
         fluxes = torch.mean(fluxes, (2, 3)).cpu().numpy()
-        c_x = torch.mean(self.field[:, 1:-1, 1:-1, 1:-1], (2, 3)).cpu().numpy()/self.vol_x
-        c_x[self.vol_x == 0] = 0
+        c_x = torch.mean(self.field[:, 1:-1, 1:-1, 1:-1], (2, 3)).cpu().numpy()
+        c_x = np.divide(c_x, self.vol_x, out=np.zeros_like(self.vol_x),
+                        where=self.vol_x != 0)
         self.c_x = c_x
         fluxes_1d = c_x[:,:-1] - c_x[:,1:]
         fluxes_1d[:,:][self.vol_x[:,1:]==0] = 0
         fluxes_1d[:,:][self.vol_x[:,:-1]==0] = 0
         eps = 0.5*(self.vol_x[:,:-1] + self.vol_x[:,1:])
-        self.tau_x = eps*fluxes_1d/fluxes
-      
+        self.tau_x = np.divide(eps * fluxes_1d, fluxes,
+            out=np.full_like(fluxes_1d, np.nan), where=fluxes != 0)
+
         for b in range(self.batch_size):
             if (fl_min[b] == 0) or (mean_fl[b] == 0):
                 _ , frac = extract_through_feature(self.cpu_img[b]>0, 1, 'x')
@@ -619,11 +623,14 @@ class MultiPhaseSolver(SORSolver):
         fl_max = np.max(self.flux_1d, axis=1)  # shape: (bs,)
         fl_min = np.min(self.flux_1d, axis=1)  # shape: (bs,)
         mean_fl = np.mean(self.flux_1d, axis=1)   # shape: (bs,)
-        relative_error = (fl_max - fl_min) / fl_max
+        relative_error = np.divide(fl_max - fl_min, fl_max,
+            out=np.full_like(fl_max, np.nan), where=fl_max != 0)
 
         self.D_eff = mean_fl * (self.Nx+1) / (self.Ny * self.Nz)\
                      / abs(self.top_bc - self.bot_bc)
-        tau = self.D_mean / self.D_eff
+        tau = np.divide(self.D_mean, self.D_eff,
+                        out=np.full_like(self.D_eff, np.nan),
+                        where=self.D_eff != 0)
       
         for b in range(self.batch_size):
             if (fl_min[b] == 0) or (mean_fl[b] == 0):
