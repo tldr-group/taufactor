@@ -165,6 +165,11 @@ class ImpedanceSolver(SORSolver):
         self.reac_label=reactive_label
         self.dx = spacing or 1
         super().__init__(img, omega=omega, device=device, precision=torch.double)
+        if self.batch_size > 1:
+            raise TypeError(
+                "Error: The ImpedanceSolver is only implemented for batch_size=1! "
+                "TODO: vectorize impedance solver for batching."
+            )
         
         torch_img = torch.tensor(self.cpu_img, dtype=self.precision, device=self.device)
         self.mask = torch.zeros_like(torch_img)
