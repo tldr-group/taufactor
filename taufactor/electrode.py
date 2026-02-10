@@ -67,8 +67,9 @@ class ElectrodeSolver(SORSolver):
         return reac_nn
 
     def compute_metrics(self):
-        c_x = torch.mean(self.field[:, 1:-1, 1:-1, 1:-1], (2, 3)).cpu().numpy()/self.vol_x
-        c_x[self.vol_x == 0] = 0
+        c_x = torch.mean(self.field[:, 1:-1, 1:-1, 1:-1], (2, 3)).cpu().numpy()
+        c_x = np.divide(c_x, self.vol_x, out=np.zeros_like(self.vol_x),
+                        where=self.vol_x != 0)
         # Largest deviation to previous check as conv crit
         relative_error = np.max(np.abs(c_x-self.c_x), axis=1)
         self.c_x = c_x
@@ -83,10 +84,14 @@ class ElectrodeSolver(SORSolver):
         fluxes_1d[:,1:][self.vol_x[:,:-1]==0] = 0
 
         # Make some quantities visible to user
+        # Porosity at voxel faces (arithmetic mean between voxel centers)
         eps = np.concatenate((self.vol_x[:,:1], 0.5*(self.vol_x[:,:-1]+self.vol_x[:,1:])), axis=1)
-        self.tau_x = eps*fluxes_1d/fluxes
-        fluxes[:,:-1] -= fluxes[:,1:] 
-        self.k_x = (fluxes) / (c_x - self.electrode_bc) / self.k_0[:, None]
+        self.tau_x = np.divide(eps * fluxes_1d, fluxes,
+            out=np.full_like(fluxes_1d, np.nan), where=fluxes != 0)
+        # Difference of in- and out-going fluxes equals reactive fluxes
+        fluxes[:,:-1] -= fluxes[:,1:]
+        self.k_x = np.divide(fluxes, c_x - self.electrode_bc, out=np.zeros_like(c_x),
+                        where=(c_x - self.electrode_bc) != 0) / self.k_0[:, None]
 
         freq = np.mean(eps, axis=1, keepdims=True) / np.mean(self.a_x*self.dx, axis=1, keepdims=True) / self.Nx**2 * 2**-3
         R = self.tau_x/eps
@@ -105,19 +110,20 @@ class ElectrodeSolver(SORSolver):
         print(f'Iter: {self.iter}, conv error: {abs(relative_error[i]):.3E}, tau: {self.tau[i]:.5f} (batch element {i})')
         fig, ax = plt.subplots() #figsize=(10, 4), dpi=200)
         x = np.arange(0, self.Nx)+0.5
-        ax.plot(x, self.vol_x[i], label='vol_x', color='gray', linestyle='--')
-        ax.plot(x, self.c_x[i], label='c_x', color='blue', linestyle='-')
-        ax.plot(x-0.5, 1/self.tau_x[i], label='1/tau_x', color='red', linestyle='-')
-        ax.plot(x, self.k_x[i]/(self.a_x[i]*self.dx), label='k_x', color='lime', linestyle='-.')
-        
+        ax.plot(x, self.vol_x[i], label='$\\epsilon(x)$', color='gray', linestyle='--')
+
         # Analytical solution for ideal c profile
         c = self.electrode_bc + (self.left_bc-self.electrode_bc)*np.cosh(1-x/self.Nx)/np.cosh(1)
-        ax.plot(x, c, label='c_ideal', color='black', linestyle=':')
+        ax.plot(x, c, label='$c_\\text{ideal}(x)$', color='black', linestyle=':')
+        
+        ax.plot(x, self.c_x[i], label='$c(x)$', color='blue', linestyle='-')
+        ax.plot(x-0.5, 1/self.tau_x[i], label='$\\tau^{-1}(x)$', color='red', linestyle='-')
+        ax.plot(x, np.abs(self.k_x[i]/(self.a_x[i]*self.dx)-1), label='rel_error', color='lime', linestyle='-.')
 
         ax.set_xlabel('voxels in x')
-        ax.set_ylabel('vol/a/c/tau/reaction')
+        ax.set_ylabel('$\\epsilon(x)$, $c(x)$, $\\tau^{-1}(x)$')
         ax.set_title(f'Homogenized quantities in iter {self.iter}')
-        ax.set_ylim(0, 1.2)
+        ax.set_ylim(-0.1, 1.1)
         ax.legend()
         ax.grid()
         plt.show()

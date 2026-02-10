@@ -127,12 +127,16 @@ class SORSolver(ABC):
                 fig, ax = plt.subplots(figsize=(8,2), dpi=200)
                 taus = np.array(self.tau_t)
                 x = np.arange(0, taus.shape[0])*100
+                min_tau, max_tau = 1, 1
                 for b in range(self.batch_size):
-                    ax.plot(x, taus[:,b], label=f'batch_{b}', linestyle='-')
+                    if relative_error[b] > 0:
+                        ax.plot(x, taus[:,b], label=f'batch_{b}', linestyle='-')
+                        min_tau = np.min([np.min(taus[:,b]), min_tau])
+                        max_tau = np.max([np.max(taus[:,b]), max_tau])
                 ax.set_xlabel('iters')
                 ax.set_ylabel('tau')
                 ax.set_title('Tau convergence')
-                ax.set_ylim(np.min(taus)-0.1, np.max(taus)+0.1)
+                ax.set_ylim(min_tau-0.1, max_tau+0.1)
                 ax.legend()
                 ax.grid()
                 plt.show()
@@ -400,7 +404,8 @@ class Solver(SORSolver):
         fig, ax = plt.subplots(figsize=(8,2), dpi=200)
         x = np.arange(0, rel_fluxes.shape[1])+0.5
         for b in range(self.batch_size):
-            ax.plot(x, rel_fluxes[b], label=f'batch_{b}', linestyle='-')
+            if relative_error[b] > 0:
+                ax.plot(x, rel_fluxes[b], label=f'batch_{b}', linestyle='-')
 
         ax.set_xlabel('voxels in x')
         ax.set_ylabel('relative fluxes')
