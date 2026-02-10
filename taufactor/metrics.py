@@ -564,6 +564,24 @@ def find_spanning_labels(labelled_array, axis):
     spanning_labels.discard(0)  # Remove the background label if it exists
     return spanning_labels
 
+def find_front_labels(labelled_array, axis):
+    """Find features that are connected to the front of given axis
+
+    Returns:
+        set: Labels that appear in the first slice of the given axis.
+    """
+    if axis == "x":
+        front = np.s_[0,:,:]
+    elif axis == "y":
+        front = np.s_[:,0,:]
+    elif axis == "z":
+        front = np.s_[:,:,0]
+    else:
+        raise ValueError("Axis should be x, y or z!")
+
+    first_slice_labels = set(np.unique(labelled_array[front]))
+    first_slice_labels.discard(0)  # Remove the background label if it exists
+    return first_slice_labels
 
 def extract_through_feature(
     array,
@@ -571,6 +589,7 @@ def extract_through_feature(
     axis,
     periodic=[False,False,False],
     connectivity=1,
+    open_end=True,
     debug=False
 ):
     """Extract spanning features and their fractions for a phase.
@@ -629,7 +648,10 @@ def extract_through_feature(
         if(debug):
             print(f"Found {num_labels} labelled regions. For connectivity {conn} and grayscale {grayscale_value}.")
 
-        through_labels = find_spanning_labels(labeled_mask,axis)
+        if open_end:
+            through_labels = find_spanning_labels(labeled_mask,axis)
+        else:
+            through_labels = find_front_labels(labeled_mask,axis)
         spanning_network = np.isin(labeled_mask, list(through_labels))
 
         through_feature.append(spanning_network)

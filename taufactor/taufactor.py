@@ -50,7 +50,7 @@ class SORSolver(ABC):
             a_x = (torch.sum(reac_nn, (2, 3)) / (self.Ny*self.Nz*self.dx)) # surface area
             # Pre-compute reaction prefactor
             k_0 = torch.mean(vol_x, 1) / torch.mean(a_x*self.dx, 1) / self.Nx**2
-            reac_nn *= k_0
+            reac_nn = reac_nn * k_0[:, None, None, None]
             self.factor += reac_nn
             self.factor[self.factor == 0] = torch.inf
             self.a_x = a_x.cpu().numpy()
@@ -127,12 +127,16 @@ class SORSolver(ABC):
                 fig, ax = plt.subplots(figsize=(8,2), dpi=200)
                 taus = np.array(self.tau_t)
                 x = np.arange(0, taus.shape[0])*100
+                min_tau, max_tau = 1, 1
                 for b in range(self.batch_size):
-                    ax.plot(x, taus[:,b], label=f'batch_{b}', linestyle='-')
+                    if relative_error[b] > 0:
+                        ax.plot(x, taus[:,b], label=f'batch_{b}', linestyle='-')
+                        min_tau = np.min([np.min(taus[:,b]), min_tau])
+                        max_tau = np.max([np.max(taus[:,b]), max_tau])
                 ax.set_xlabel('iters')
                 ax.set_ylabel('tau')
                 ax.set_title('Tau convergence')
-                ax.set_ylim(np.min(taus)-0.1, np.max(taus)+0.1)
+                ax.set_ylim(min_tau-0.1, max_tau+0.1)
                 ax.legend()
                 ax.grid()
                 plt.show()
@@ -354,12 +358,29 @@ class Solver(SORSolver):
         fl_max = np.max(self.flux_1d, axis=1)  # shape: (bs,)
         fl_min = np.min(self.flux_1d, axis=1)  # shape: (bs,)
         mean_fl = np.mean(self.flux_1d, axis=1)   # shape: (bs,)
-        relative_error = (fl_max - fl_min) / fl_max
+        relative_error = np.divide(fl_max - fl_min, fl_max,
+            out=np.full_like(fl_max, np.nan), where=fl_max != 0)
 
         self.D_rel = mean_fl * self.Nx / (self.Ny * self.Nz)\
                      / abs(self.top_bc - self.bot_bc)
-        tau = self.VF / self.D_rel
-      
+        tau = np.divide(self.VF, self.D_rel,
+            out=np.full_like(self.D_rel, np.nan), where=self.D_rel != 0)
+
+        fluxes = -self.field[:, 2:-1, 1:-1, 1:-1] + self.field[:, 1:-2, 1:-1, 1:-1]
+        fluxes[self.field[:, 2:-1, 1:-1, 1:-1] == 0] = 0
+        fluxes[self.field[:, 1:-2, 1:-1, 1:-1] == 0] = 0
+        fluxes = torch.mean(fluxes, (2, 3)).cpu().numpy()
+        c_x = torch.mean(self.field[:, 1:-1, 1:-1, 1:-1], (2, 3)).cpu().numpy()
+        c_x = np.divide(c_x, self.vol_x, out=np.zeros_like(self.vol_x),
+                        where=self.vol_x != 0)
+        self.c_x = c_x
+        fluxes_1d = c_x[:,:-1] - c_x[:,1:]
+        fluxes_1d[:,:][self.vol_x[:,1:]==0] = 0
+        fluxes_1d[:,:][self.vol_x[:,:-1]==0] = 0
+        eps = 0.5*(self.vol_x[:,:-1] + self.vol_x[:,1:])
+        self.tau_x = np.divide(eps * fluxes_1d, fluxes,
+            out=np.full_like(fluxes_1d, np.nan), where=fluxes != 0)
+
         for b in range(self.batch_size):
             if (fl_min[b] == 0) or (mean_fl[b] == 0):
                 _ , frac = extract_through_feature(self.cpu_img[b]>0, 1, 'x')
@@ -368,6 +389,7 @@ class Solver(SORSolver):
                     relative_error[b] = 0 # Set to converged
                     self.D_rel[b] = 0
                     tau[b] = 0
+                    self.tau_x[b,:] = 0
         # If NaN values occuring set to converged to stop
         relative_error[np.isnan(mean_fl)] = 0
         self.D_eff = self.D_0*self.D_rel
@@ -382,7 +404,8 @@ class Solver(SORSolver):
         fig, ax = plt.subplots(figsize=(8,2), dpi=200)
         x = np.arange(0, rel_fluxes.shape[1])+0.5
         for b in range(self.batch_size):
-            ax.plot(x, rel_fluxes[b], label=f'batch_{b}', linestyle='-')
+            if relative_error[b] > 0:
+                ax.plot(x, rel_fluxes[b], label=f'batch_{b}', linestyle='-')
 
         ax.set_xlabel('voxels in x')
         ax.set_ylabel('relative fluxes')
@@ -605,11 +628,14 @@ class MultiPhaseSolver(SORSolver):
         fl_max = np.max(self.flux_1d, axis=1)  # shape: (bs,)
         fl_min = np.min(self.flux_1d, axis=1)  # shape: (bs,)
         mean_fl = np.mean(self.flux_1d, axis=1)   # shape: (bs,)
-        relative_error = (fl_max - fl_min) / fl_max
+        relative_error = np.divide(fl_max - fl_min, fl_max,
+            out=np.full_like(fl_max, np.nan), where=fl_max != 0)
 
         self.D_eff = mean_fl * (self.Nx+1) / (self.Ny * self.Nz)\
                      / abs(self.top_bc - self.bot_bc)
-        tau = self.D_mean / self.D_eff
+        tau = np.divide(self.D_mean, self.D_eff,
+                        out=np.full_like(self.D_eff, np.nan),
+                        where=self.D_eff != 0)
       
         for b in range(self.batch_size):
             if (fl_min[b] == 0) or (mean_fl[b] == 0):
@@ -641,288 +667,3 @@ class MultiPhaseSolver(SORSolver):
         ax.legend()
         ax.grid()
         plt.show()
-
-
-class ElectrodeSolver():
-    """AC electrode tortuosity solver (migration + capacitive current).
-
-    Solves a complex-valued potential field under sinusoidal excitation
-    with a closed (zero-flux) right boundary, using an SOR-like update
-    and frequency-dependent prefactors. Reports the electrode
-    tortuosity from boundary current.
-
-    Args:
-        img (numpy.ndarray): 2D or 3D binary image; internally batched.
-        omega (float, optional): Angular frequency of excitation.
-            Defaults to ``1e-6``.
-        device (str | torch.device, optional): Compute device.
-            Defaults to ``'cuda'``.
-
-    Attributes:
-        omega (float): Angular excitation frequency.
-        res (float): Series resistance coefficient.
-        c_DL (float): Double-layer capacitance coefficient.
-        A_CC (int): Current-collector interfacial area.
-        k_0 (float): Scaling constant for normalization.
-        VF (float): Volume fraction of the conductive phase.
-        img (torch.Tensor): Working image on device.
-        phi (torch.Tensor): Complex potential field (padded).
-        phase_map (torch.Tensor): Padded binary phase mask.
-        prefactor (torch.Tensor): Complex update prefactors.
-        w (float): Over-relaxation factor.
-        cb (list[torch.Tensor]): Checkerboard masks.
-        converged (bool): Global convergence flag.
-        semiconverged (float | bool): Stage convergence tracker.
-        iter (int): Iteration counter.
-        tau_e (float | torch.Tensor): Electrode tortuosity estimate.
-        D_eff (float | None): Placeholder; not central to AC solve.
-        D_mean (float | None): Placeholder; not central to AC solve.
-
-    Notes:
-        This class is standalone (does not inherit from :class:`BaseSolver`)
-        due to its complex-valued field and AC-specific update scheme.
-    """
-
-    def __init__(self, img, omega=1e-6, device='cuda'):
-        img = np.expand_dims(img, 0)
-        self.cpu_img = img
-        self.precision = torch.double
-        # check device is available
-        self.device = torch.device(device)
-        if torch.device(device).type.startswith('cuda') and not torch.cuda.is_available():
-            self.device = torch.device('cpu')
-            warnings.warn(
-                "CUDA not available, defaulting device to cpu. To avoid this warning, explicitly set the device when initialising the solver with device=torch.device('cpu')")
-        # Define omega, res and c_DL
-        self.omega = omega
-        self.res = 1
-        self.c_DL = 1
-        if len(img.shape) == 4:
-            self.A_CC = img.shape[2]*img.shape[3]
-        else:
-            self.A_CC = img.shape[2]
-        self.k_0 = 1
-
-        # VF calc
-        self.VF = np.mean(img)
-
-        # save original image in cuda
-        img = torch.tensor(img, dtype=self.precision).to(self.device)
-        self.img = img
-        # init phi
-
-        self.phi = self.init_phi(img)
-
-        self.phase_map = self.pad(img, [1, 0])
-
-        # create prefactor map
-        self.prefactor = self.init_prefactor(img)
-
-        # checkerboarding
-        self.w = 2 - torch.pi / (1.5 * img.shape[1])
-        # self.w = 1.8
-        # self.w = 0.01
-        self.cb = self.init_cb(img)
-
-        # solving params
-        self.converged = False
-        self.semiconverged = False
-        self.old_fl = -1
-        self.iter = 1
-
-        # Results
-        self.tau_e = 0
-        self.D_eff = None
-        self.D_mean = None
-
-    def pad(self, img, vals=[0] * 6):
-        while len(vals) < 6:
-            vals.append(0)
-        if len(img.shape) == 4:
-            to_pad = [1]*8
-            to_pad[-2:] = (0, 0)
-        elif len(img.shape) == 3:
-            to_pad = [1]*6
-            to_pad[-2:] = (0, 0)
-
-        img = torch.nn.functional.pad(img, to_pad, 'constant')
-        img[:, 0], img[:, -1] = vals[:2]
-        img[:, :, 0], img[:, :, -1] = vals[2:4]
-
-        if len(img.shape) == 4:
-            img[:, :, :, 0], img[:, :, :, -1] = vals[4:]
-        return img
-
-    def crop(self, img, c=1):
-        if len(img.shape) == 4:
-            return img[:, c:-c, c:-c, c:-c]
-        elif len(img.shape) == 3:
-            return img[:, c:-c, c:-c]
-
-    def init_phi(self, img):
-        """
-        Initialise phi field as zeros
-
-        :param img: input image, with 1s conductive and 0s non-conductive
-        :type img: torch.array
-        :return: phi
-        :rtype: torch.array
-        """
-        phi = torch.zeros_like(img, dtype=self.precision,
-                               device=self.device)+0j
-        phi = self.pad(phi, [1, 0])
-        return phi.to(self.device)
-
-    def init_cb(self, img):
-
-        if len(img.shape) == 4:
-            bs, x, y, z = img.shape
-            cb = np.zeros([x, y, z])
-            a, b, c = np.meshgrid(range(x), range(y), range(z), indexing='ij')
-            cb[(a + b + c) % 2 == 0] = 1*self.w
-            return [torch.roll(torch.tensor(cb), sh, 0).to(self.device) for sh in [0, 1]]
-
-        elif len(img.shape) == 3:
-            bs, x, y = img.shape
-            cb = np.zeros([x, y])
-            a, b = np.meshgrid(range(x), range(y), indexing='ij')
-            cb[(a + b) % 2 == 0] = 1*self.w
-            cb = [torch.roll(torch.tensor(cb).to(self.device), sh, 0)
-                  for sh in [0, 1]]
-            cb[1][0] = cb[1][2]
-            return cb
-
-    def init_prefactor(self, img):
-        """
-        Initialise prefactors -> (nn_cond+2j*omega*res*c(dims-nn_cond))**-1
-
-        :param img: input image, with 1s conductive and 0s non-conductive
-        :type img: cp.array
-        :return: prefactor
-        :rtype: cp.array
-        """
-        dims = (len(img.shape)-1)*2
-        # find number of conducting nearest neighbours
-        img2 = self.pad(img, [1, 0])
-        nn_cond = torch.zeros_like(img2, dtype=self.precision)
-        # iterate through shifts in the spatial dimensions
-        for dim in range(1, len(img.shape)):
-            for dr in [1, -1]:
-                nn_cond += torch.roll(img2, dr, dim)
-        # remove the paddings
-        nn_cond = self.crop(nn_cond, 1)
-        self.nn = nn_cond
-        orc = self.omega*self.res*self.c_DL
-        nn_solid = dims - nn_cond
-        omegapf = (orc**2 + 1j*orc)/(orc**2+1)
-        prefactor = (nn_cond + 2*nn_solid*omegapf)**-1
-        # prefactor = (nn_cond+2j*self.omega*self.res*self.c_DL*(dims-nn_cond))**-1
-        prefactor[prefactor == torch.inf] = 0
-        prefactor[img == 0] = 0
-        return prefactor.to(self.device)
-
-    def sum_neighbours(self):
-        i = 0
-        for dim in range(1, len(self.phi.shape)):
-            for dr in [1, -1]:
-                if i == 0:
-                    out = torch.roll(self.phi, dr, dim)
-                else:
-                    out += torch.roll(self.phi, dr, dim)
-                i += 1
-
-        out = self.crop(out, 1)
-        return out
-
-    def check_convergence(self):
-
-        if len(self.tau_es) < 1000:
-            return False
-        loss = np.std(np.array(self.tau_es[-100:]))
-        # print(len(self.tau_es),self.tau_es[-1], loss)
-        if self.verbose == 'per_iter':
-            print(f'(iter {self.iter} loss {loss}, taue {self.tau_es[-1]}')
-        if loss < self.conv_crit:
-            if self.semiconverged:
-                if self.tau_es[-1] > 1e-5:
-                    if abs(self.semiconverged - self.tau_es[-1]) < self.conv_crit_2:
-                        self.tau_e = self.tau_es[-1]
-                        self._end_simulation()
-                        return True
-                else:
-                    self.phi = self.init_phi(self.img)
-            self.semiconverged = self.tau_es[-1]
-            self.omega *= 0.1
-            print(
-                f'Semi-converged to {self.semiconverged}. Reducing omega to {self.omega} to check convergence')
-
-            self.iter = 0
-            self.prefactor = self.init_prefactor(self.img)
-            self.solve(iter_limit=self.iter_limit,
-                       verbose=self.verbose, conv_crit=self.conv_crit)
-            return True
-        if self.iter_limit == self.iter:
-            print(
-                'Iteration limit reached. Increase the iteration limit or try starting from a smaller omega')
-
-            return True
-        return False
-
-    def tau_e_from_phi(self):
-        #  calculate total current on bottom boundary
-        n = self.phase_map[0, 1].sum()
-        z = self.res / (n-self.phi[0, 1].sum())
-        self.z = z
-        r_ion = z.real*3
-        tau_e = self.VF * r_ion * self.k_0 * self.A_CC / self.phi.shape[1]
-
-        return tau_e.cpu()
-
-    def solve(self, iter_limit=100000, verbose=True, conv_crit=1e-5, conv_crit_2=1e-3):
-        """
-        run a solve simulation
-
-        :param iter_limit: max iterations before aborting, will attemtorch double for the same no. iterations
-        if initialised as singles
-        :param verbose: Whether to print tau. Can be set to 'per_iter' for more feedback
-        :param conv_crit: convergence criteria - running standard deviation of tau_e
-        :param conv_crit_2: convergence criteria - maximum difference between tau_e in consecutive omega solves
-        :return: tau
-        """
-        self.conv_crit = conv_crit
-        self.conv_crit_2 = conv_crit_2
-
-        self.iter_limit = iter_limit
-        self.verbose = verbose
-        dim = len(self.phi.shape)
-        self.start = timer()
-        self.frames = []
-        self.loss = []
-        self.tau_es = []
-
-        while not self.converged and self.iter <= iter_limit:
-            out = self.sum_neighbours()
-            out *= self.prefactor*self.crop(self.phase_map)
-            out[self.prefactor == -1] = 0
-            self.tau_es.append(self.tau_e_from_phi())
-            if self.iter % 100 == 0:
-                self.converged = self.check_convergence()
-            out -= self.crop(self.phi, 1)
-            out *= self.cb[self.iter % 2]
-
-            if dim == 4:
-                self.phi[:, 1:-1, 1:-1, 1:-1] += out
-            elif dim == 3:
-                self.phi[:, 1:-1, 1:-1] += out
-
-            self.iter += 1
-        # self.tau_e = self.tau_es[-1]
-        # self._end_simulation(iter_limit, verbose, start)
-
-    def _end_simulation(self, ):
-        if self.iter == self.iter_limit - 1:
-            print('Warning: not converged')
-            converged = 'unconverged value of tau'
-        converged = 'converged to'
-        if self.verbose:
-            print(f'{converged}: {self.tau_e} after: {self.iter} iterations in: {np.around(timer() - self.start, 4)} seconds at a rate of {np.around((timer() - self.start)/self.iter, 4)} s/iter')

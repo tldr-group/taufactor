@@ -36,11 +36,11 @@ def test_solver_on_uniform_rectangular_block_non_solver_dim():
     S.solve()
     assert np.around(S.tau, decimals=5) == 1.0
 
-def test_solver_on_empty_block():
+def test_solver_non_percolating():
     """Run solver on a block of zeros."""
     N = 20
     img = np.zeros([N, N, N]).reshape(1, N, N, N)
-    img[:, 0] = 1
+    img[:, :2] = 1
     S = tau.Solver(img, device=pt.device('cpu'))
     S.solve(verbose='per_iter', iter_limit=1000)
     assert S.tau == pt.inf
@@ -70,7 +70,7 @@ def test_solver_on_slanted_strip_of_ones():
 def test_deadend():
     """Test deadend pore"""
     solid  = np.zeros((10,50,50))
-    solid[:8, 25,25] = 1
+    solid[:8, 25, 25] = 1
     # solve for tau
     S = tau.Solver(solid)
     S.solve()
@@ -88,11 +88,11 @@ def test_periodic_solver_on_uniform_block():
     S.solve()
     assert np.around(S.tau, decimals=5) == 1.0
 
-def test_periodic_solver_on_empty_block():
+def test_periodic_solver_non_percolating():
     """Run periodic solver on a block of zeros."""
     N = 20
     img = np.zeros([N, N, N]).reshape(1, N, N, N)
-    img[:, 0] = 1
+    img[:, :2] = 1
     S = tau.PeriodicSolver(img, device=pt.device('cpu'))
     S.solve(verbose='per_iter', iter_limit=1000)
     assert S.tau == pt.inf
@@ -126,10 +126,11 @@ def test_multiphase_and_solver_agree():
 
     assert err < 0.02
 
-def test_mphsolver_on_empty_block():
+def test_mphsolver_non_percolating():
     """Run mpsolver on a block of zeros."""
     N = 20
     img = np.zeros([N, N, N]).reshape(1, N, N, N)
+    img[:, :2] = 1
     S = tau.MultiPhaseSolver(img, device=pt.device('cpu'))
     S.solve(iter_limit=1000)
     assert S.tau == pt.inf
@@ -193,18 +194,15 @@ def test_taue_deadend():
     N = 100
     img = np.zeros((N, N))
     img[:75, 45:55] = 1
-    img[img != 1] = 0
-    esolver = tau.ElectrodeSolver(img, device=pt.device('cpu'))
+    esolver = tau.ImpedanceSolver(img, device=pt.device('cpu'))
     esolver.solve()
-    assert np.around(esolver.tau_e, 3) == 0.601
-
+    assert np.around(esolver.tau, 3) == 0.594
 
 def test_taue_throughpore():
     """Run taue solver on a strip of ones, 1/4 volume of total"""
     N = 100
     img = np.zeros((N, N))
     img[:, 45:55] = 1
-    img[img != 1] = 0
-    esolver = tau.ElectrodeSolver(img, device=pt.device('cpu'))
+    esolver = tau.ImpedanceSolver(img, device=pt.device('cpu'))
     esolver.solve()
-    assert np.around(esolver.tau_e, 3) == 1.046
+    assert np.around(esolver.tau, 3) == 0.986
