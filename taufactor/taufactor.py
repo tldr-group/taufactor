@@ -273,7 +273,7 @@ class SORSolver(ABC):
             msg = 'unconverged value of tau'
 
         if verbose:
-            print(f'{msg}: {self.tau} after: {iterations} iterations in: {np.around(timer() - start, 4)}s ({np.around((timer() - start)/(iterations), 4)} s/iter)')
+            print(f'{msg}: {self.tau} after: {iterations} iterations in: {np.around(timer() - start, 4)} s ({np.around((timer() - start)/(iterations), 4)} s/iter)')
             if self.device.type == 'cuda':
                 print(f"GPU-RAM currently {torch.cuda.memory_allocated(device=self.device) / 1e6:.2f} MB "
                       f"(max allocated {torch.cuda.max_memory_allocated(device=self.device) / 1e6:.2f} MB; "
