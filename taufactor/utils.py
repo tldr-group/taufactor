@@ -164,6 +164,43 @@ def theoretical_fcc_metrics(a, overlap):
 
     return volume_fraction, specific_surface, cap_radius
 
+def create_stacked_blocks(Nx, features=1):
+    """Create the shifted block/checkerboard structure used for solver benchmarks."""
+    if Nx % (2*features) != 0:
+        raise ValueError(f"Nx must be a multiple of 2*features; got Nx={Nx} and features={features}")
+    feature_size = Nx // (2*features)
+    x, y, z = np.ogrid[:Nx, :Nx, :Nx]
+    shift = ((x // feature_size) % 2 ) * Nx // 4
+    pattern = (
+        ((x // feature_size) + ((y + shift) // feature_size) + ((z + shift) // feature_size)) % 2
+    )
+    return pattern.astype(int)
+
+def create_2d_diagonals(Nx, features=1):
+    """Create a 2D diagonal pattern extruded in z."""
+    if Nx % (2*features) != 0:
+        raise ValueError(f"Nx must be a multiple of 2*features; got Nx={Nx} and features={features}")
+    feature_size = Nx // (2*features)
+    x, y, z = np.ogrid[:Nx, :Nx, :Nx]
+    pattern = (((x + y) // feature_size) % 2) + z - z
+    return pattern.astype(int)
+
+def create_2d_zigzag(Nx, features=1):
+    """Create mirrored 2D diagonal channels (zigzag) extruded in z."""
+    pattern = create_2d_diagonals(Nx, features)
+    half = Nx // 2
+    pattern[half:] = pattern[:half][::-1]
+    return pattern
+
+def create_3d_diagonals(Nx, features=1):
+    """Create a 3D diagonal pattern."""
+    if Nx % (2*features) != 0:
+        raise ValueError(f"Nx must be a multiple of 2*features; got Nx={Nx} and features={features}")
+    feature_size = Nx // (2*features)
+    x, y, z = np.ogrid[:Nx, :Nx, :Nx]
+    pattern = (((x + y + z) // feature_size) % 2)
+    return pattern.astype(int)
+
 def extract_inner_features(labelled_array, verbose=True):
     initial_labels = np.unique(labelled_array).size
     if initial_labels < 3:

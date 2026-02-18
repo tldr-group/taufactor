@@ -12,6 +12,7 @@ Welcome to TauFactor's documentation!
    notebooks/02-surface-areas.ipynb
    notebooks/10-tau-x-validation.ipynb
    notebooks/11-transmission-line-model.ipynb
+   notebooks/12-solver-benchmark.ipynb
    api
    contributing
    authors
