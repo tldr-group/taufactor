@@ -147,20 +147,26 @@ def theoretical_fcc_metrics(a, overlap):
     Return theoretical metrics of FCC unit cell structure.
     Notation consistent with https://en.wikipedia.org/wiki/Spherical_cap
     """
-    if overlap < (1-np.cos(np.pi/6))*2:
-        radius = 0.25*np.sqrt(2)*a/(1-0.5*overlap)
-        h = 0.5*radius*overlap
+    overlap_limit = (1-np.cos(np.pi/6))*2
+    if overlap >= overlap_limit:
+        raise ValueError("Overlap must be smaller than 26.8%!")
+
+    radius = 0.25*np.sqrt(2)*a/(1-0.5*overlap)
+    h = 0.5*radius*overlap
+
+    if h <= 0:
+        cap_radius = 0.0
+        volume = 4*4/3*np.pi*radius**3
+        surface = 4*4*np.pi*radius**2
+    else:
         cap_radius = np.sqrt(2*radius*h - h*h)
         cap_volume = np.pi/3*h*h*(3*radius-h)
         cap_area = 2*np.pi*radius*h
-
         volume = 4*4/3*np.pi*radius**3 - 48*cap_volume
-        volume_fraction = volume/(a**3)
-
         surface = 4*4*np.pi*radius**2 - 48*cap_area
-        specific_surface = surface/(a**3)
-    else:
-        raise ValueError("Overlap must be smaller than 26.8%!")
+
+    volume_fraction = volume/(a**3)
+    specific_surface = surface/(a**3)
 
     return volume_fraction, specific_surface, cap_radius
 
