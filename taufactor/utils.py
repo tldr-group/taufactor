@@ -219,8 +219,3 @@ def create_3d_diagonals(Nx, features=1):
     x, y, z = np.ogrid[:Nx, :Nx, :Nx]
     pattern = (((x + y + z) // feature_size) % 2)
     return pattern.astype(int)
-
-
-
-
-

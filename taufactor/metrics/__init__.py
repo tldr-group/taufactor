@@ -1,5 +1,10 @@
 from .base import volume_fraction, triple_phase_boundary
-from .connectivity import extract_through_feature, find_front_labels, find_spanning_labels, label_periodic
+from .connectivity import (
+    extract_through_feature,
+    find_front_labels,
+    find_spanning_labels,
+    label_periodic,
+)
 from .particles import (
     estimate_3d_psd_saltykov,
     particle_size_distribution,
@@ -7,6 +12,7 @@ from .particles import (
     relabel_random_order,
     relabel_sequential,
     remove_boundary_features,
+    split_lumped_labels,
 )
 from .surfaces import interfacial_areas, specific_surface_area
 

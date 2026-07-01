@@ -10,6 +10,7 @@ from taufactor.metrics import (
     remove_boundary_features,
     relabel_random_order,
     relabel_sequential,
+    split_lumped_labels,
 )
 import numpy as np
 import pytest
@@ -348,3 +349,38 @@ def test_estimate_3d_psd_saltykov_recovers_peak_bin_for_monodisperse_spheres():
     peak_bin = int(np.argmax(estimate["counts_3d"]))
     assert peak_bin == len(estimate["bin_centers"]) - 1
     assert np.isclose(estimate["fractions_3d"].sum(), 1.0)
+
+
+def test_split_lumped_labels_splits_components_into_new_labels():
+    labelled = np.zeros((8, 8, 8), dtype=int)
+    labelled[1:3, 1:3, 1:3] = 5
+    labelled[5:7, 5:7, 5:7] = 5
+    labelled[2:5, 4:6, 2:5] = 9
+    original = labelled.copy()
+
+    fixed, report = split_lumped_labels(labelled, verbose=False, return_report=True)
+
+    assert np.array_equal(labelled, original)
+    assert fixed is not labelled
+    assert report["n_labels"] == 2
+    assert report["n_split_labels"] == 1
+    assert report["n_new_labels"] == 1
+    assert report["has_splits"] is True
+    assert report["split_labels"] == {5: [10]}
+    assert set(np.unique(fixed)) == {0, 5, 9, 10}
+    assert split_lumped_labels(fixed, verbose=False, return_report=True)[1]["has_splits"] is False
+
+
+def test_split_lumped_labels_returns_clean_report_for_connected_labels():
+    labelled = np.zeros((8, 8, 8), dtype=int)
+    labelled[1:4, 1:4, 1:4] = 5
+    labelled[4:7, 4:7, 4:7] = 9
+
+    fixed, report = split_lumped_labels(labelled, verbose=False, return_report=True)
+
+    assert np.array_equal(fixed, labelled)
+    assert report["n_labels"] == 2
+    assert report["n_split_labels"] == 0
+    assert report["n_new_labels"] == 0
+    assert report["has_splits"] is False
+    assert report["split_labels"] == {}

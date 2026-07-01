@@ -2,6 +2,7 @@ import numpy as np
 import warnings
 
 from skimage import measure
+from scipy.ndimage import find_objects, generate_binary_structure, label
 
 from .surfaces import specific_surface_area
 
@@ -63,6 +64,71 @@ def remove_boundary_features(labelled_array, verbose=True, periodic=(False, Fals
     if verbose:
         print(f"{np.unique(inner_features).size-1} of initial {initial_labels-1} labels remaining.")
     return inner_features
+
+
+def split_lumped_labels(labelled_array, connectivity=1, background=0, verbose=True, return_report=False):
+    """Split groups of particles with one lumped label into new labels.
+
+    Args:
+        labelled_array: 2D or 3D labeled array.
+        connectivity: Connectivity passed to ``scipy.ndimage.label``.
+        background: Background label to ignore. Defaults to ``0``.
+        verbose: If ``True``, print a short summary.
+        return_report: If ``True``, also return a summary of the applied splits.
+
+    Returns:
+        numpy.ndarray | tuple[numpy.ndarray, dict]: A relabeled copy of the
+        input array, optionally with a report describing the performed splits.
+    """
+    fixed = np.asarray(labelled_array).copy()
+    if fixed.ndim not in (2, 3):
+        raise ValueError(f"Expected a 2D or 3D labeled array, got {fixed.ndim}D input.")
+    if connectivity < 1 or connectivity > fixed.ndim:
+        raise ValueError(f"connectivity must be between 1 and {fixed.ndim} for a {fixed.ndim}D array.")
+
+    next_label = int(np.max(fixed)) + 1 if fixed.size else 1
+    split_labels = {}
+    unique_labels, inverse = np.unique(fixed, return_inverse=True)
+    non_background_mask = unique_labels != background
+    non_background_labels = unique_labels[non_background_mask]
+    compact_lookup = np.zeros(unique_labels.size, dtype=np.int32)
+    compact_lookup[non_background_mask] = np.arange(1, non_background_labels.size + 1, dtype=np.int32)
+    compact = compact_lookup[inverse].reshape(fixed.shape)
+    structure = generate_binary_structure(fixed.ndim, connectivity)
+    n_labels = int(non_background_labels.size)
+
+    for compact_label, bbox in enumerate(find_objects(compact), start=1):
+        if bbox is None:
+            continue
+        component_labels, n_components = label(compact[bbox] == compact_label, structure=structure)
+        if n_components <= 1:
+            continue
+        label_value = int(non_background_labels[compact_label - 1])
+        region = fixed[bbox]
+        split_labels[label_value] = []
+        for component_id in range(2, n_components + 1):
+            region[component_labels == component_id] = next_label
+            split_labels[label_value].append(next_label)
+            next_label += 1
+
+    report = {
+        "n_labels": int(n_labels),
+        "n_split_labels": int(len(split_labels)),
+        "n_new_labels": int(sum(len(new_labels) for new_labels in split_labels.values())),
+        "split_labels": split_labels,
+        "has_splits": bool(split_labels),
+    }
+    if verbose:
+        if split_labels:
+            print(
+                f"Split {report['n_split_labels']} labels and created "
+                f"{report['n_new_labels']} new labels."
+            )
+        else:
+            print(f"All {report['n_labels']} labels were already connected.")
+    if return_report:
+        return fixed, report
+    return fixed
 
 
 def particle_size_distribution(
