@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def flux_direction(im, outpath=None):
+def plot_flux_direction(im, outpath=None):
     """
     Plots the flux direction of the image and provides code for transposing the image to change the flux direction
     :param im: segmented input image with n phases
@@ -59,6 +59,7 @@ def flux_direction(im, outpath=None):
         plt.show()
     return fig, axes
 
+
 def compute_impedance(R, C, freq):
     """
     Compute impedance given resistor and capacitor arrays.
@@ -69,6 +70,7 @@ def compute_impedance(R, C, freq):
     for R_i, C_i in zip(R[::-1], C[::-1]):
         Z = R_i + 1.0 / (1j * freq * C_i + 1.0 / Z)
     return Z
+
 
 def compute_impedance_batched(R, C, freq):
     """
@@ -95,6 +97,7 @@ def compute_impedance_batched(R, C, freq):
         Z = Rk + 1.0 / (1j * w * Ck + 1.0 / Z)
     return Z
 
+
 def add_voxel_sphere(array, center_x, center_y, center_z, radius):
     """
     Create a voxelized representation of a sphere in 3D array based on
@@ -106,6 +109,7 @@ def add_voxel_sphere(array, center_x, center_y, center_z, radius):
     distance_squared = (x - center_x + 0.5)**2 + (y - center_y + 0.5)**2 + (z - center_z + 0.5)**2
     mask = distance_squared <= radius**2
     array[mask] = 1
+
 
 def create_fcc_cube(pixels, overlap=0.0):
     """
@@ -142,6 +146,7 @@ def create_fcc_cube(pixels, overlap=0.0):
 
     return cube
 
+
 def theoretical_fcc_metrics(a, overlap):
     """
     Return theoretical metrics of FCC unit cell structure.
@@ -170,6 +175,7 @@ def theoretical_fcc_metrics(a, overlap):
 
     return volume_fraction, specific_surface, cap_radius
 
+
 def create_stacked_blocks(Nx, features=1):
     """Create stacked blocks with alternating half-block shifts in y and z.
 
@@ -186,6 +192,7 @@ def create_stacked_blocks(Nx, features=1):
     pattern = (((y + shift) // feature_size) + ((z - shift) // feature_size)) % 2
     return pattern.astype(int)
 
+
 def create_2d_diagonals(Nx, features=1):
     """Create a 2D diagonal pattern extruded in z."""
     if Nx % (2*features) != 0:
@@ -195,12 +202,14 @@ def create_2d_diagonals(Nx, features=1):
     pattern = (((x + y) // feature_size) % 2) + z - z
     return pattern.astype(int)
 
+
 def create_2d_zigzag(Nx, features=1):
     """Create mirrored 2D diagonal channels (zigzag) extruded in z."""
     pattern = create_2d_diagonals(Nx, features)
     half = Nx // 2
     pattern[half:] = pattern[:half][::-1]
     return pattern
+
 
 def create_3d_diagonals(Nx, features=1):
     """Create a 3D diagonal pattern."""
@@ -211,34 +220,7 @@ def create_3d_diagonals(Nx, features=1):
     pattern = (((x + y + z) // feature_size) % 2)
     return pattern.astype(int)
 
-def extract_inner_features(labelled_array, verbose=True):
-    initial_labels = np.unique(labelled_array).size
-    if initial_labels < 3:
-        raise ValueError("Input array should be labelled array with more than 3 phases!")
 
-    # Find all features which are in contact with domain boundary
-    boundary_labels = np.unique(labelled_array[0,:,:])
-    boundary_labels = np.concatenate((boundary_labels, np.unique(labelled_array[-1,:,:])))
-    boundary_labels = np.concatenate((boundary_labels, np.unique(labelled_array[:,0,:])))
-    boundary_labels = np.concatenate((boundary_labels, np.unique(labelled_array[:,-1,:])))
-    boundary_labels = np.concatenate((boundary_labels, np.unique(labelled_array[:,:,0])))
-    boundary_labels = np.concatenate((boundary_labels, np.unique(labelled_array[:,:,-1])))
-    boundary_labels = np.unique(boundary_labels)
 
-    mask_boundary_labels = np.isin(labelled_array, boundary_labels)
-    labelled_array[mask_boundary_labels] = 0
-    if verbose:
-        print(f"{np.unique(labelled_array).size} of initial {initial_labels} labels remaining.")
-    return labelled_array
 
-def relabel_random_order(array):
-    remaining_labels = np.unique(array)
-    new_labels = np.arange(len(remaining_labels))
-    # Zero should be kept where it is
-    np.random.shuffle(new_labels[1:])
 
-    # Create a mapping from old labels to new shuffled labels
-    label_mapping = dict(zip(remaining_labels, new_labels))
-    relabel_function = np.vectorize(lambda x: label_mapping[x])
-
-    return relabel_function(array)
