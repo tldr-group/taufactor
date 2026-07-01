@@ -1,7 +1,18 @@
 """Tests for `taufactor` package."""
 
-from taufactor.metrics import volume_fraction, specific_surface_area, triple_phase_boundary
+from taufactor.metrics import (
+    estimate_3d_psd_saltykov,
+    particle_size_distribution,
+    particle_size_distribution_2d,
+    specific_surface_area,
+    triple_phase_boundary,
+    volume_fraction,
+    remove_boundary_features,
+    relabel_random_order,
+    relabel_sequential,
+)
 import numpy as np
+import pytest
 
 
 # Volume fraction
@@ -142,6 +153,7 @@ def test_surface_area_on_multi_cubes():
     assert results == reference
 
 
+# Triple phase boundary
 def test_tpb_2d():
     """Run tpb on 3x3"""
     N = 3
@@ -172,3 +184,167 @@ def test_tpb_3d_corners():
     img[:, 0] = 2
     tpb = triple_phase_boundary(img)
     assert tpb == 1/3
+
+
+# Relabelling and remove boundary labels
+def test_relabel_random_order_preserves_partitions_and_zero_label():
+    array = np.array(
+        [
+            [0, 7, 7, 2],
+            [9, 0, 2, 9],
+            [2, 7, 9, 0],
+        ]
+    )
+
+    np.random.seed(0)
+    relabelled = relabel_random_order(array)
+
+    assert relabelled.shape == array.shape
+    assert np.array_equal(relabelled[array == 0], np.zeros(np.count_nonzero(array == 0), dtype=relabelled.dtype))
+    assert np.array_equal(np.unique(relabelled), np.arange(np.unique(array).size))
+
+    for label in np.unique(array):
+        mapped = np.unique(relabelled[array == label])
+        assert mapped.size == 1
+
+
+def test_remove_boundary_features_returns_new_array_without_mutating_input():
+    labelled = np.zeros((4, 4, 4), dtype=int)
+    labelled[0, 1, 1] = 1
+    labelled[1:3, 1:3, 1:3] = 2
+    original = labelled.copy()
+
+    inner = remove_boundary_features(labelled, verbose=False)
+
+    assert np.array_equal(labelled, original)
+    assert inner is not labelled
+    assert 1 not in np.unique(inner)
+    assert 2 in np.unique(inner)
+
+
+def test_remove_boundary_features_rejects_binary_masks_with_clear_message():
+    labelled = np.zeros((3, 3, 3), dtype=int)
+    labelled[1, 1, 1] = 1
+
+    with pytest.raises(ValueError, match="binary mask|connected-component labeling"):
+        remove_boundary_features(labelled, verbose=False)
+
+
+def test_remove_boundary_features_ignores_periodic_boundaries():
+    labelled = np.zeros((4, 4, 4), dtype=int)
+    labelled[0, 1:3, 1:3] = 1
+    labelled[-1, 1:3, 1:3] = 1
+    labelled[1:3, 1:3, 1:3] = 2
+
+    inner = remove_boundary_features(labelled, verbose=False, periodic=(True, False, False))
+
+    assert set(np.unique(inner)) == {0, 1, 2}
+
+
+def test_relabel_sequential_compacts_labels_without_python_loop_per_label():
+    labelled = np.array([[0, 10, 10], [7, 0, 3]])
+
+    relabelled = relabel_sequential(labelled)
+
+    assert np.array_equal(relabelled, np.array([[0, 3, 3], [2, 0, 1]]))
+
+
+# Particle size distribution
+def test_particle_size_distribution_removes_boundary_labels():
+    img = np.zeros((8, 8, 8), dtype=int)
+    img[0, 1:3, 1:3] = 5
+    img[2:5, 2:5, 2:5] = 9
+    img[3, 3, 3] = 0
+    img[5:7, 5:7, 5:7] = 12
+
+    psd = particle_size_distribution(img, warn=False, return_field=True)
+
+    assert psd["n_particles_initial"] == 3
+    assert psd["n_particles_kept"] == 2
+    assert np.array_equal(psd["particle_labels"], np.array([1, 2]))
+    assert np.array_equal(psd["volumes"], np.array([26.0, 8.0]))
+    assert np.allclose(psd["equivalent_diameters"], (6.0 * psd["volumes"] / np.pi) ** (1.0 / 3.0))
+    assert psd["removed_label_fraction"] == 1 / 3
+    assert np.isclose(psd["removed_mass_fraction"], 4 / 38)
+    assert psd["labels"][3, 3, 3] == 0
+
+
+def test_particle_size_distribution_ignores_periodic_boundary_axes():
+    img = np.zeros((6, 6, 6), dtype=int)
+    img[0, 2:4, 2:4] = 4
+    img[-1, 2:4, 2:4] = 4
+    img[2:4, 2:4, 2:4] = 7
+
+    non_periodic = particle_size_distribution(img, periodic=(False, False, False), warn=False)
+    periodic_x = particle_size_distribution(img, periodic=(True, False, False), warn=False)
+
+    assert non_periodic["n_particles_kept"] == 1
+    assert periodic_x["n_particles_kept"] == 2
+    assert np.array_equal(periodic_x["volumes"], np.array([8.0, 8.0]))
+
+
+def test_particle_size_distribution_warns_when_boundary_removal_discards_most_particles_and_mass():
+    img = np.zeros((6, 6, 6), dtype=int)
+    img[0, 1:3, 1:3] = 1
+    img[-1, 1:3, 1:3] = 2
+    img[1:5, 0, 1:3] = 3
+    img[2:4, 2:4, 2:4] = 4
+
+    with pytest.warns(UserWarning, match="more than half"):
+        particle_size_distribution(img)
+
+
+def test_particle_size_distribution_scales_with_spacing_and_returns_sphericity():
+    img = np.zeros((10, 10, 10), dtype=int)
+    img[3:7, 3:7, 3:7] = 11
+
+    psd = particle_size_distribution(
+        img,
+        spacing=(2, 1, 1),
+        compute_sphericity=True,
+        warn=False,
+    )
+
+    assert np.array_equal(psd["particle_labels"], np.array([1]))
+    assert np.array_equal(psd["volumes"], np.array([128.0]))
+    assert np.allclose(psd["equivalent_diameters"], np.array([(6.0 * 128.0 / np.pi) ** (1.0 / 3.0)]))
+    assert psd["surface_areas"].shape == (1,)
+    assert psd["surface_areas"][0] > 0
+    assert psd["sphericity"].shape == (1,)
+    assert np.isfinite(psd["sphericity"][0])
+
+
+def test_particle_size_distribution_2d_removes_edge_particles_and_computes_circularity():
+    img = np.zeros((16, 16), dtype=int)
+    yy, xx = np.ogrid[:16, :16]
+    disk = (xx - 8) ** 2 + (yy - 8) ** 2 <= 9
+    img[disk] = 4
+    img[0:3, 0:3] = 7
+
+    psd = particle_size_distribution_2d(img, warn=False, return_field=True)
+
+    expected_area = float(np.count_nonzero(disk))
+    assert psd["n_particles_initial"] == 2
+    assert psd["n_particles_kept"] == 1
+    assert np.array_equal(psd["particle_labels"], np.array([1]))
+    assert np.allclose(psd["areas"], np.array([expected_area]))
+    assert np.allclose(psd["equivalent_diameters"], np.array([np.sqrt(4.0 * expected_area / np.pi)]))
+    assert psd["circularity"].shape == (1,)
+    assert 0.7 < psd["circularity"][0] <= 1.1
+    assert 7 not in np.unique(psd["labels"])
+
+
+def test_estimate_3d_psd_saltykov_recovers_peak_bin_for_monodisperse_spheres():
+    true_diameter = 10.0
+    radius = true_diameter / 2.0
+    z = np.linspace(0.0, radius * 0.999, 2000)
+    apparent_diameters = 2.0 * np.sqrt(radius**2 - z**2)
+
+    estimate = estimate_3d_psd_saltykov(
+        apparent_diameters,
+        bin_edges=np.linspace(0.0, true_diameter, 6),
+    )
+
+    peak_bin = int(np.argmax(estimate["counts_3d"]))
+    assert peak_bin == len(estimate["bin_centers"]) - 1
+    assert np.isclose(estimate["fractions_3d"].sum(), 1.0)
