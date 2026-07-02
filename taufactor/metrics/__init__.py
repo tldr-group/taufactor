@@ -30,5 +30,6 @@ __all__ = [
     "remove_boundary_features",
     "relabel_random_order",
     "relabel_sequential",
+    "split_lumped_labels",
     "triple_phase_boundary",
 ]
