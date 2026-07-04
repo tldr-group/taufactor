@@ -290,36 +290,38 @@ def interfacial_areas(
 
     if method == 'face_counting':
 
-        def add_phasepairs(a: torch.Tensor, b: torch.Tensor, phasepairs) -> None:
+        def add_phasepairs(a: torch.Tensor, b: torch.Tensor, interfacial_areas, face_area: float):
             idx = (a != b)
             if idx.any():
                 neighbours = torch.stack([a[idx], b[idx]])
-                phasepairs = torch.cat((phasepairs, torch.transpose(neighbours, 0, 1)), 0)
-            return phasepairs
+                phasepairs = torch.transpose(neighbours, 0, 1)
+                phasepairs, _ = torch.sort(phasepairs, dim=1)
+                pairs, counts = torch.unique(phasepairs, return_counts=True, dim=0)
+                counts = face_area * counts.to(torch.float64)
+                for i in range(pairs.shape[0]):
+                    pair = (int(pairs[i][0]), int(pairs[i][1]))
+                    interfacial_areas[pair] = interfacial_areas.get(pair, 0.0) + float(counts[i])
+            return interfacial_areas
 
         tensor = tensor.to(torch.int32)
-        phasepairs = torch.tensor([[0,0]], device=device)
-        phasepairs = add_phasepairs(tensor[:-1, :, :], tensor[1:, :, :], phasepairs)
-        phasepairs = add_phasepairs(tensor[: ,:-1, :], tensor[:, 1:, :], phasepairs)
-        phasepairs = add_phasepairs(tensor[:, :, :-1], tensor[:, :, 1:], phasepairs)
+        interfacial_areas = {}
+        interfacial_areas = add_phasepairs(tensor[:-1, :, :], tensor[1:, :, :], interfacial_areas, dy*dz)
+        interfacial_areas = add_phasepairs(tensor[: ,:-1, :], tensor[:, 1:, :], interfacial_areas, dx*dz)
+        interfacial_areas = add_phasepairs(tensor[:, :, :-1], tensor[:, :, 1:], interfacial_areas, dx*dy)
 
         # Periodic wrap faces (compare the two boundary slabs)
         if periodic[0]:
-            phasepairs = add_phasepairs(tensor[0, :, :], tensor[-1, :, :], phasepairs)
+            interfacial_areas = add_phasepairs(tensor[0, :, :], tensor[-1, :, :], interfacial_areas, dy*dz)
         if periodic[1]:
-            phasepairs = add_phasepairs(tensor[:, 0, :], tensor[:, -1, :], phasepairs)
+            interfacial_areas = add_phasepairs(tensor[:, 0, :], tensor[:, -1, :], interfacial_areas, dx*dz)
         if periodic[2]:
-            phasepairs = add_phasepairs(tensor[:, :, 0], tensor[:, :, -1], phasepairs)
+            interfacial_areas = add_phasepairs(tensor[:, :, 0], tensor[:, :, -1], interfacial_areas, dx*dy)
 
-        # Crop initial dummy values
-        phasepairs = phasepairs[1:]
-        phasepairs, _ = torch.sort(phasepairs, dim=1)
-        pairs, counts = torch.unique(phasepairs, return_counts=True, dim=0)
-        counts = counts.to(torch.float64)
         if normalize:
             volume = (nx * ny * nz) * (dx * dy * dz)
-            counts = counts / volume
-        interfacial_areas = {(int(pairs[i][0]), int(pairs[i][1])): float(counts[i]) for i in range(pairs.shape[0])}
+            interfacial_areas = {
+                pair: area / volume for pair, area in interfacial_areas.items()
+            }
     
     else:
         raise ValueError("Only method='face_counting' implemented for now.")
