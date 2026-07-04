@@ -2,6 +2,7 @@
 
 from taufactor.metrics import (
     estimate_3d_psd_saltykov,
+    interfacial_areas,
     particle_size_distribution,
     particle_size_distribution_2d,
     specific_surface_area,
@@ -152,6 +153,27 @@ def test_surface_area_on_multi_cubes():
                  0.0422, 0.0705, 0.0211, \
                  0.0482, 0.0709, 0.0241]
     assert results == reference
+
+
+def test_interfacial_areas_match_three_phase_specific_surface_area_with_spacing():
+    img = np.zeros((2, 2, 2), dtype=int)
+    img[0, 1, :] = 1
+    img[1, 0, :] = 2
+    img[1, 1, :] = 1
+
+    spacing = (2.0, 3.0, 5.0)
+    phases = {'0': 0, '1': 1, '2': 2}
+
+    interfaces = interfacial_areas(img, spacing=spacing)
+    ssa = specific_surface_area(img, spacing=spacing, phases=phases, method='face_counting')
+
+    area01 = 0.5 * (ssa['0'] + ssa['1'] - ssa['2'])
+    area02 = 0.5 * (ssa['0'] + ssa['2'] - ssa['1'])
+    area12 = 0.5 * (ssa['1'] + ssa['2'] - ssa['0'])
+
+    assert np.isclose(interfaces[(0, 1)], area01)
+    assert np.isclose(interfaces[(0, 2)], area02)
+    assert np.isclose(interfaces[(1, 2)], area12)
 
 
 # Triple phase boundary
