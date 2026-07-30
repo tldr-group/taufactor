@@ -298,11 +298,12 @@ class SORSolver(ABC):
         field[:, :, :, 0], field[:, :, :, -1] = 0, 0
         return field
 
-    @staticmethod
-    def _slice_volume_fraction(mask: torch.Tensor) -> torch.Tensor:
-        """Per-x-slice volume fraction of a boolean mask, without a float copy."""
-        ny, nz = mask.shape[2], mask.shape[3]
-        return torch.sum(mask, (2, 3), dtype=torch.float32) / (ny * nz)
+    def _slice_volume_fraction(self, mask: torch.Tensor) -> torch.Tensor:
+        """Per-x-slice volume fraction of a boolean mask, without a float copy.
+
+        Accumulated directly in ``self.precision``; the mask stays boolean.
+        """
+        return torch.sum(mask, (2, 3), dtype=self.precision) / (mask.shape[2] * mask.shape[3])
 
     @staticmethod
     def _neighbour_sum(src: torch.Tensor, out: torch.Tensor, x_ghosts=(0, 0)) -> None:
