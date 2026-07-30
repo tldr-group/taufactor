@@ -272,7 +272,7 @@ class SORSolver(ABC):
         """
         if chunk_size is not None:
             return max(1, min(self.Nx, int(chunk_size)))
-        budget = 256 * 2**20  # bytes of scratch per sweep chunk
+        budget = 64 * 2**20  # bytes of scratch per sweep chunk
         per_slice = max(1, self.batch_size * self.Ny * self.Nz * self.precision.itemsize)
         n = min(self.Nx, max(2, budget // per_slice))
         # Keep chunks even so a chunk's local parity matches the global one
