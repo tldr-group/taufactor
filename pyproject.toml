@@ -36,6 +36,7 @@ dependencies = [
     "psutil>=5.9.0",
     "ipython>=7.0.0",
     "torch>=2.1",
+    "connected-components-3d>=3.0",
 ]
 
 [project.optional-dependencies]

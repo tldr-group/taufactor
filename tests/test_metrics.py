@@ -7,6 +7,7 @@ from taufactor.metrics import (
     estimate_3d_psd_saltykov,
     extract_connected_network,
     interfacial_areas,
+    label_periodic,
     particle_size_distribution,
     particle_size_distribution_2d,
     relabel_random_order,
@@ -90,6 +91,17 @@ def test_extract_connected_network_finds_spanning_phase_with_periodic_labeling()
     assert np.array_equal(result[1]["connected_mask"], img == 1)
     assert result[1]["connected_fraction"] == 1
     assert np.array_equal(result[1]["spatial_vol_frac_disconnected"], np.zeros(3))
+
+
+def test_label_periodic_uses_its_connectivity_for_periodic_pairs():
+    img = np.zeros((3, 3, 3), dtype=np.uint8)
+    img[0, 0, 0] = 1
+    img[1, 1, 0] = 1
+
+    _, face_components = label_periodic(img, 1, (False, False, False), connectivity=1)
+    _, edge_components = label_periodic(img, 1, (False, False, False), connectivity=2)
+
+    assert (face_components, edge_components) == (2, 1)
 
 
 def test_extract_connected_network_combines_phase_labels_into_one_network():
