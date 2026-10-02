@@ -5222,9 +5222,6 @@ version = "1.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "connected-components-3d" },
-    { name = "ipython", version = "8.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "ipython", version = "8.39.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
-    { name = "ipython", version = "9.16.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "matplotlib", version = "3.9.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "matplotlib", version = "3.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -5265,7 +5262,6 @@ notebooks = [
 requires-dist = [
     { name = "connected-components-3d", specifier = ">=3.0" },
     { name = "ipympl", marker = "extra == 'notebooks'" },
-    { name = "ipython", specifier = ">=7.0.0" },
     { name = "ipywidgets", marker = "extra == 'notebooks'" },
     { name = "matplotlib", specifier = ">=3.4" },
     { name = "notebook", marker = "extra == 'notebooks'" },
