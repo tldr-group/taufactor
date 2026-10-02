@@ -133,8 +133,7 @@ class ImpedanceSolver(SORSolver):
         if (verbose) and (self.device.type == 'cuda'):
             torch.cuda.reset_peak_memory_stats(device=self.device)
 
-        if verbose == 'debug':
-            self.tau_t = []
+        self.tau_t = []
 
         self.impedance = []
         self.converged_freq = []

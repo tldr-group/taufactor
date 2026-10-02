@@ -80,6 +80,7 @@ class SORSolver(ABC):
         self.old_tau = 0
         self.iter = 0
         self.tau = None
+        self.tau_t = []
         self.tau_x = None
         self.D_eff = None
 
@@ -153,35 +154,34 @@ class SORSolver(ABC):
         if (verbose == 'plot') and (self.iter % (100*plot_interval) == 0):
             self.plot_stats(relative_error)
 
-        if verbose == 'debug':
-            self.tau_t.append(self.tau)
-            if (self.iter % (100*plot_interval) == 0):
-                i = np.argmax(np.abs(relative_error))
-                if not hasattr(self, '_debug_fig'):
-                    self._debug_fig, self._debug_ax = plt.subplots(figsize=(8,2), dpi=200)
-                ax = self._debug_ax
-                ax.clear()
-                taus = np.array(self.tau_t)
-                x = np.arange(0, taus.shape[0])*100
-                min_tau, max_tau = 1, 1
-                for b in range(self.batch_size):
-                    if relative_error[b] > 0:
-                        ax.plot(x, taus[:,b], label=f'batch_{b}', linestyle='-')
-                        min_tau = np.min([np.min(taus[:,b]), min_tau])
-                        max_tau = np.max([np.max(taus[:,b]), max_tau])
-                ax.set_xlabel('iters')
-                ax.set_ylabel('tau')
-                ax.set_title('Tau convergence')
-                self._set_plot_subtitle(
-                    ax, f'Iter: {self.iter}, conv error: {np.abs(relative_error[i]):.3E}, '
-                    f'tau: {self.tau[i]:.5f} (batch element {i})'
-                )
-                ax.set_ylim(min_tau-0.1, max_tau+0.1)
-                ax.legend()
-                ax.grid()
-                self._debug_fig.canvas.draw_idle()
-                self._debug_fig.canvas.flush_events()
-                self._display_figure(self._debug_fig, '_debug_display')
+        self.tau_t.append(self.tau)
+        if (verbose == 'debug') and (self.iter % (100*plot_interval) == 0):
+            i = np.argmax(np.abs(relative_error))
+            if not hasattr(self, '_debug_fig'):
+                self._debug_fig, self._debug_ax = plt.subplots(figsize=(8,2), dpi=200)
+            ax = self._debug_ax
+            ax.clear()
+            taus = np.array(self.tau_t)
+            x = np.arange(0, taus.shape[0])*100
+            min_tau, max_tau = 1, 1
+            for b in range(self.batch_size):
+                if relative_error[b] > 0:
+                    ax.plot(x, taus[:,b], label=f'batch_{b}', linestyle='-')
+                    min_tau = np.min([np.min(taus[:,b]), min_tau])
+                    max_tau = np.max([np.max(taus[:,b]), max_tau])
+            ax.set_xlabel('iters')
+            ax.set_ylabel('tau')
+            ax.set_title('Tau convergence')
+            self._set_plot_subtitle(
+                ax, f'Iter: {self.iter}, conv error: {np.abs(relative_error[i]):.3E}, '
+                f'tau: {self.tau[i]:.5f} (batch element {i})'
+            )
+            ax.set_ylim(min_tau-0.1, max_tau+0.1)
+            ax.legend()
+            ax.grid()
+            self._debug_fig.canvas.draw_idle()
+            self._debug_fig.canvas.flush_events()
+            self._display_figure(self._debug_fig, '_debug_display')
 
         if not np.all(relative_error < conv_crit):
             self.old_tau = self.tau
@@ -208,8 +208,7 @@ class SORSolver(ABC):
         if (verbose) and (self.device.type == 'cuda'):
             torch.cuda.reset_peak_memory_stats(device=self.device)
 
-        if verbose == 'debug':
-            self.tau_t = []
+        self.tau_t = []
 
         with torch.no_grad():
             increment = torch.empty(

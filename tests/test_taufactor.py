@@ -44,6 +44,15 @@ def test_solver_non_percolating():
     S.solve(verbose='per_iter', iter_limit=1000)
     assert S.tau == pt.inf
 
+
+def test_solver_records_tau_history_without_debug():
+    S = tau.Solver(np.ones((10, 10, 10)), device='cpu')
+
+    S.solve(verbose=False, iter_limit=100)
+
+    assert len(S.tau_t) == 1
+    np.testing.assert_allclose(S.tau_t[-1], S.tau)
+
 def test_solver_on_strip_of_ones():
     """Run solver on a strip of ones, 1/4 volume of total"""
     N = 20
