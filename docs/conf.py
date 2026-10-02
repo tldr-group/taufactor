@@ -27,7 +27,6 @@ html_theme = "sphinx_rtd_theme"
 autodoc_mock_imports = [
     "matplotlib",
     "psutil",
-    "IPython",
     "numpy",
     "scipy",
     "skimage",
