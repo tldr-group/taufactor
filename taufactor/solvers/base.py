@@ -8,7 +8,6 @@ from timeit import default_timer as timer
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import clear_output
 
 try:
     import torch
@@ -122,6 +121,27 @@ class SORSolver(ABC):
     def plot_stats(self, relative_error):
         """Default: No plotting output."""
 
+    def _display_figure(self, fig, display_attr):
+        """Display ``fig`` once in notebooks, then update it in place."""
+        if not plt.isinteractive():
+            plt.ion()
+        try:
+            from IPython.display import display
+        except ImportError:
+            return
+        if not hasattr(self, display_attr):
+            setattr(self, display_attr, display(fig, display_id=True))
+            plt.close(fig)
+        else:
+            getattr(self, display_attr).update(fig)
+
+    @staticmethod
+    def _set_plot_subtitle(ax, subtitle):
+        """Add a small status line below an axes title."""
+        ax.set_title(ax.get_title(), pad=24)
+        ax.text(0.5, 1.02, subtitle, transform=ax.transAxes, ha='center',
+                va='bottom', fontsize='small', clip_on=False)
+
     def check_convergence(self, verbose, conv_crit, plot_interval):
         self.tau, relative_error = self.compute_metrics()
 
@@ -136,10 +156,11 @@ class SORSolver(ABC):
         if verbose == 'debug':
             self.tau_t.append(self.tau)
             if (self.iter % (100*plot_interval) == 0):
-                clear_output(wait=True)
                 i = np.argmax(np.abs(relative_error))
-                print(f'Iter: {self.iter}, conv error: {np.abs(relative_error[i]):.3E}, tau: {self.tau[i]:.5f} (batch element {i})')
-                _, ax = plt.subplots(figsize=(8,2), dpi=200)
+                if not hasattr(self, '_debug_fig'):
+                    self._debug_fig, self._debug_ax = plt.subplots(figsize=(8,2), dpi=200)
+                ax = self._debug_ax
+                ax.clear()
                 taus = np.array(self.tau_t)
                 x = np.arange(0, taus.shape[0])*100
                 min_tau, max_tau = 1, 1
@@ -151,10 +172,16 @@ class SORSolver(ABC):
                 ax.set_xlabel('iters')
                 ax.set_ylabel('tau')
                 ax.set_title('Tau convergence')
+                self._set_plot_subtitle(
+                    ax, f'Iter: {self.iter}, conv error: {np.abs(relative_error[i]):.3E}, '
+                    f'tau: {self.tau[i]:.5f} (batch element {i})'
+                )
                 ax.set_ylim(min_tau-0.1, max_tau+0.1)
                 ax.legend()
                 ax.grid()
-                plt.show()
+                self._debug_fig.canvas.draw_idle()
+                self._debug_fig.canvas.flush_events()
+                self._display_figure(self._debug_fig, '_debug_display')
 
         if not np.all(relative_error < conv_crit):
             self.old_tau = self.tau

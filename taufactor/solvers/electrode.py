@@ -2,7 +2,6 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import clear_output
 
 try:
     import torch
@@ -111,10 +110,11 @@ class ElectrodeSolver(SORSolver):
         return tau, relative_error
     
     def plot_stats(self, relative_error):
-        clear_output(wait=True)
         i = np.argmax(relative_error)
-        print(f'Iter: {self.iter}, conv error: {abs(relative_error[i]):.3E}, tau: {self.tau[i]:.5f} (batch element {i})')
-        _, ax = plt.subplots() #figsize=(10, 4), dpi=200)
+        if not hasattr(self, '_plot_fig'):
+            self._plot_fig, self._plot_ax = plt.subplots()
+        ax = self._plot_ax
+        ax.clear()
         x = np.arange(0, self.Nx)+0.5
         ax.plot(x, self.vol_x[i], label='$\\epsilon(x)$', color='gray', linestyle='--')
 
@@ -129,10 +129,16 @@ class ElectrodeSolver(SORSolver):
         ax.set_xlabel('voxels in x')
         ax.set_ylabel('$\\epsilon(x)$, $c(x)$, $\\tau^{-1}(x)$')
         ax.set_title(f'Homogenized quantities in iter {self.iter}')
+        self._set_plot_subtitle(
+            ax, f'Iter: {self.iter}, conv error: {abs(relative_error[i]):.3E}, '
+            f'tau: {self.tau[i]:.5f} (batch element {i})'
+        )
         ax.set_ylim(-0.1, 1.1)
         ax.legend()
         ax.grid()
-        plt.show()
+        self._plot_fig.canvas.draw_idle()
+        self._plot_fig.canvas.flush_events()
+        self._display_figure(self._plot_fig, '_plot_display')
 
 
 class PeriodicElectrodeSolver(ElectrodeSolver):
