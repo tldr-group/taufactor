@@ -4,7 +4,6 @@ import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import clear_output
 
 try:
     import torch
@@ -73,12 +72,13 @@ class ThroughTransportSolver(SORSolver):
 
     def plot_stats(self, relative_error):
         """Plot relative fluxes across x direction to visualize convergence."""
-        clear_output(wait=True)
         i = np.argmax(relative_error)
-        print(f'Iter: {self.iter}, conv error: {abs(relative_error[i]):.3E}, tau: {self.tau[i]:.5f} (batch element {i})')
         mean = np.expand_dims(np.mean(self.flux_1d, axis=1), 1)
         rel_fluxes = ((self.flux_1d - mean)/mean)
-        _, ax = plt.subplots(figsize=(8,2), dpi=200)
+        if not hasattr(self, '_plot_fig'):
+            self._plot_fig, self._plot_ax = plt.subplots(figsize=(8,2), dpi=200)
+        ax = self._plot_ax
+        ax.clear()
         x = np.arange(0, rel_fluxes.shape[1])+0.5
         for b in range(self.batch_size):
             if relative_error[b] > 0:
@@ -87,10 +87,16 @@ class ThroughTransportSolver(SORSolver):
         ax.set_xlabel('voxels in x')
         ax.set_ylabel('relative fluxes')
         ax.set_title(f'Relative flux convergence in flux direction in iter {self.iter}')
+        self._set_plot_subtitle(
+            ax, f'Iter: {self.iter}, conv error: {abs(relative_error[i]):.3E}, '
+            f'tau: {self.tau[i]:.5f} (batch element {i})'
+        )
         ax.set_ylim(-0.1, 0.1)
         ax.legend()
         ax.grid()
-        plt.show()
+        self._plot_fig.canvas.draw_idle()
+        self._plot_fig.canvas.flush_events()
+        self._display_figure(self._plot_fig, '_plot_display')
 
 
 class Solver(ThroughTransportSolver):

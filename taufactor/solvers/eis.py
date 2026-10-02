@@ -4,7 +4,6 @@ from timeit import default_timer as timer
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import clear_output
 
 try:
     import torch
@@ -195,10 +194,12 @@ class ImpedanceSolver(SORSolver):
         return self.left_bc/influx[0]
     
     def plot_stats(self, relative_error):
-        clear_output(wait=True)
         i = np.argmax(relative_error)
-        print(f'Iter: {self.iter}, conv error: {abs(relative_error[i]):.3E}, tau: {self.tau[i]:.5f} (batch element {i})')
-        _, ax = plt.subplots(1, 2, figsize=(10, 4), dpi=200)
+        if not hasattr(self, '_plot_fig'):
+            self._plot_fig, self._plot_ax = plt.subplots(1, 2, figsize=(10, 4), dpi=200)
+        ax = self._plot_ax
+        for axis in ax:
+            axis.clear()
         x = np.arange(0, self.Nx)+0.5
         ax[0].plot(x, self.vol_x, label='vol_x', color='gray', linestyle='--')
         ax[0].plot(x, self.c_x, label='c_x', color='blue', linestyle='-')
@@ -210,6 +211,10 @@ class ImpedanceSolver(SORSolver):
         ax[0].set_xlabel('voxels in x')
         ax[0].set_ylabel('vol/c')
         ax[0].set_title(f'Homogenized quantities in iter {self.iter}')
+        self._set_plot_subtitle(
+            ax[0], f'Iter: {self.iter}, conv error: {abs(relative_error[i]):.3E}, '
+            f'tau: {self.tau[i]:.5f} (batch element {i})'
+        )
         ax[0].set_ylim(0, 1.2)
         ax[0].legend()
         ax[0].grid()
@@ -241,7 +246,9 @@ class ImpedanceSolver(SORSolver):
         ax[1].set_xlabel("Z'")
         ax[1].set_ylabel("-Z''")
         ax[1].set_title('Nyquist plot of TLM')
-        plt.show()
+        self._plot_fig.canvas.draw_idle()
+        self._plot_fig.canvas.flush_events()
+        self._display_figure(self._plot_fig, '_plot_display')
 
     def compute_metrics(self):
         # TODO: vectorize for batching
