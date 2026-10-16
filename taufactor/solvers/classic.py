@@ -4,6 +4,7 @@ import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.linalg import eigh_tridiagonal
 
 try:
     import torch
@@ -18,10 +19,113 @@ class ThroughTransportSolver(SORSolver):
 
     Uses Dirichlet boundary conditions in x to calculate tortuosity from
     staedy-state fluxes.
+
+
+    ``omega=None`` preserves the size-based fixed relaxation factor. A number
+    fixes it explicitly; ``omega='adaptive'`` starts from a slice spectral
+    estimate and adapts independently for each batch channel using full-sweep
+    update norms.
     """
-    def __init__(self, img, omega = None, precision=None, device='cuda'):
+    def __init__(self, img, omega=None, precision=None, device='cuda'):
         self.top_bc, self.bot_bc = (-0.5, 0.5) # boundary conditions
-        super().__init__(img, omega, precision, device)
+        self._adaptive_omega = isinstance(omega, str) and omega == 'adaptive'
+        if isinstance(omega, str) and not self._adaptive_omega:
+            raise ValueError("omega must be None, a number, or 'adaptive'")
+        super().__init__(img, 1.0 if self._adaptive_omega else omega, precision, device)
+        if self._adaptive_omega:
+            self._omega_values = self._coarse_omega_guess()
+            self.omega = torch.as_tensor(
+                self._omega_values, dtype=self.precision, device=self.device,
+            ).reshape(self.batch_size, 1, 1, 1)
+            self._omega_norm = np.full(self.batch_size, np.nan)
+            self._omega_rate = np.full(self.batch_size, np.nan)
+            self.omega_history = [(0, self._omega_values.copy())]
+
+    def _coarse_omega_guess(self):
+        """Estimate the slowest Jacobi mode restricted to constant X slices."""
+        mask = torch.isfinite(self.factor)
+        mass = torch.empty((self.batch_size, self.Nx), dtype=torch.float64, device=self.device)
+        # Limit temporary storage to a slab, rather than another full field.
+        for x in range(0, self.Nx, 32):
+            slab = self.factor[:, x:x + 32].masked_fill(~mask[:, x:x + 32], 0)
+            mass[:, x:x + 32] = slab.sum(dim=(2, 3), dtype=torch.float64)
+        del slab
+        if hasattr(self, 'D_x'):
+            conductance = self.D_x.sum(dim=(2, 3), dtype=torch.float64)
+        else:
+            conductance = torch.cat((
+                mask[:, :1].sum(dim=(2, 3)),
+                (mask[:, :-1] & mask[:, 1:]).sum(dim=(2, 3)),
+                mask[:, -1:].sum(dim=(2, 3)),
+            ), dim=1).to(torch.float64)
+        mass = mass.cpu().numpy()
+        conductance = conductance.cpu().numpy()
+        omega = np.ones(self.batch_size)
+        for b in np.flatnonzero(self.percolates):
+            diagonal = conductance[b, :-1] + conductance[b, 1:]
+            # Cell-centred Dirichlet faces have twice the bond conductance.
+            diagonal[0] += conductance[b, 0]
+            diagonal[-1] += conductance[b, -1]
+            diagonal /= mass[b]
+            off_diagonal = -conductance[b, 1:-1] / np.sqrt(mass[b, :-1] * mass[b, 1:])
+            gap = (diagonal[0] if self.Nx == 1 else eigh_tridiagonal(
+                diagonal, off_diagonal, select='i', select_range=(0, 0),
+                eigvals_only=True,
+            )[0])
+            rho = float(np.clip(1 - gap, 0, 1))
+            omega[b] = min(2 / (1 + np.sqrt(1 - rho**2)), 2 - 1e-6)
+        return omega
+
+    def _sample_adaptive_omega_update(self, increment):
+        """Sample one complete red-black sweep every 20 full sweeps."""
+        norm = torch.linalg.vector_norm(increment, dim=(1, 2, 3)).square()
+        if self.iter % 40 == 39:
+            self._omega_red_norm = norm
+        elif hasattr(self, '_omega_red_norm'):
+            norm = torch.sqrt(self._omega_red_norm + norm).cpu().numpy()
+            del self._omega_red_norm
+            self._update_adaptive_omega(norm)
+
+    def _update_adaptive_omega(self, norm):
+        """Damp stable contraction estimates independently for each channel."""
+        norm = np.asarray(norm, dtype=np.float64)
+        previous = self._omega_norm
+        self._omega_norm = norm.copy()
+        changed = False
+        for b in range(self.batch_size):
+            old_rate = self._omega_rate[b]
+            self._omega_rate[b] = np.nan
+            if not self.percolates[b] or not (
+                np.isfinite(previous[b]) and np.isfinite(norm[b]) and
+                previous[b] > 0 and norm[b] > 0
+            ):
+                continue
+            rate = float((norm[b] / previous[b]) ** (1 / 20))
+            if not np.isfinite(rate) or not 0 < rate < 1:
+                continue
+            self._omega_rate[b] = rate
+            # Compare decay rates, rather than nearly-one contraction factors.
+            if not np.isfinite(old_rate) or abs(np.log(rate / old_rate)) > 0.25 * abs(np.log(rate)):
+                continue
+            omega = self._omega_values[b]
+            if rate - (omega - 1) <= 0.05 * (2 - omega):
+                continue
+            rho = (rate + omega - 1) / (omega * np.sqrt(rate))
+            if not 0 < rho < 1:
+                continue
+            target = 2 / (1 + np.sqrt(1 - rho**2))
+            updated = min(0.5 * (omega + target), 2 - 1e-6)
+            if updated <= omega:
+                continue
+            self._omega_values[b] = updated
+            # Reset only this channel: other channels keep their windows.
+            self._omega_norm[b] = self._omega_rate[b] = np.nan
+            changed = True
+        if changed:
+            self.omega.copy_(torch.as_tensor(
+                self._omega_values, dtype=self.precision, device=self.device,
+            ).reshape(self.batch_size, 1, 1, 1))
+            self.omega_history.append((self.iter, self._omega_values.copy()))
 
     def init_field(self, mask):
         """Sets an initial linear field across the volume"""
@@ -124,7 +228,7 @@ class Solver(ThroughTransportSolver):
         ValueError: If labels are not strictly in ``{0, 1}``.
     """
 
-    def __init__(self, img, omega=None, D_0=1, device='cuda'):
+    def __init__(self, img, omega='adaptive', D_0=1, device='cuda'):
         self._check_binary_labels(img)
         self.conductive_labels = [1]
         super().__init__(img, omega=omega, device=device)
@@ -189,7 +293,7 @@ class AnisotropicSolver(Solver):
         UserWarning: If spacing anisotropy is very large.
     """
 
-    def __init__(self, img, spacing, omega=None, D_0=1, device='cuda:0'):
+    def __init__(self, img, spacing, omega='adaptive', D_0=1, device='cuda:0'):
         if not isinstance(spacing, (list, tuple)) or len(spacing) != 3:
             raise ValueError("spacing must be a list or tuple with three elements (dx, dy, dz)")
         if not all(isinstance(x, (int, float)) for x in spacing):
@@ -280,7 +384,7 @@ class MultiPhaseSolver(ThroughTransportSolver):
         ValueError: If any diffusivity is negative or non-finite.
     """
 
-    def __init__(self, img, diffusivities=None, D_scaling=1, omega=None, device='cuda'):
+    def __init__(self, img, diffusivities=None, D_scaling=1, omega='adaptive', device='cuda'):
         # Validate diffusivities
         if diffusivities is None:
             diffusivities = {0: 0, 1: 1}

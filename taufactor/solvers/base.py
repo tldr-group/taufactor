@@ -30,6 +30,8 @@ class SORSolver(ABC):
     connectivity_open_end = True
 
     def __init__(self, img: np.ndarray, omega: float | None = None, precision=None, device='cuda'):
+        if isinstance(omega, str):
+            raise TypeError("omega must be None or a number for this solver")
         if torch is None:
             raise ImportError(
                 "PyTorch is required to use TauFactor solvers. Install pytorch following "
@@ -37,6 +39,12 @@ class SORSolver(ABC):
             )
         self.cpu_img = self._expand_to_4d(img)
         self.batch_size, self.Nx, self.Ny, self.Nz = self.cpu_img.shape
+        if any(periodic and size % 2 for periodic, size in
+               zip(self.connectivity_periodic[1:], (self.Ny, self.Nz))):
+            raise ValueError(
+                "Periodic solvers require even Y/Z dimensions; use the "
+                "corresponding non-periodic solver instead!"
+            )
         self.device = self._init_device(device)
         self.precision = precision or torch.float
 
@@ -209,6 +217,7 @@ class SORSolver(ABC):
             torch.cuda.reset_peak_memory_stats(device=self.device)
 
         self.tau_t = []
+        adaptive_omega = getattr(self, '_adaptive_omega', False)
 
         with torch.no_grad():
             increment = torch.empty(
@@ -225,6 +234,9 @@ class SORSolver(ABC):
                 self._apply_chequerboard(increment)
                 self.field[:, 1:-1, 1:-1, 1:-1] += increment
                 self.iter += 1
+
+                if adaptive_omega and self.iter % 40 in (39, 0):
+                    self._sample_adaptive_omega_update(increment)
 
                 if self.iter % 100 == 0:
                     self.converged = self.check_convergence(verbose, conv_crit, plot_interval)

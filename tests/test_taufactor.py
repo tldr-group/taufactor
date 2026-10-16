@@ -71,7 +71,7 @@ def test_solver_on_slanted_strip_of_ones():
         img[i, i:i+2, i:i+2] = 1
     S = tau.Solver(img, device='cpu')
     S.solve()
-    assert np.around(S.tau, decimals=5) == 7.51668
+    assert np.around(S.tau, decimals=5) == 7.51667
 
 def test_deadend():
     """Test deadend pore"""
@@ -103,13 +103,27 @@ def test_periodic_solver_non_percolating():
     S.solve(verbose='per_iter', iter_limit=1000)
     assert S.tau == pt.inf
 
+
+@pytest.mark.parametrize('solver_cls', [
+    tau.PeriodicSolver, tau.PeriodicMultiPhaseSolver,
+    tau.PeriodicElectrodeSolver, tau.PeriodicImpedanceSolver,
+])
+def test_periodic_solvers_reject_odd_y_dimension(solver_cls):
+    with pytest.raises(ValueError, match='even Y/Z dimensions'):
+        solver_cls(np.ones((4, 3, 2)), omega=1.4, device='cpu')
+
+
+def test_periodic_transport_solver_rejects_odd_z_dimension_with_adaptive_omega():
+    with pytest.raises(ValueError, match='even Y/Z dimensions'):
+        tau.PeriodicSolver(np.ones((4, 2, 1)), omega='adaptive', device='cpu')
+
 def test_connectivity_settings_match_solver_boundaries():
     """Periodic and electrode solvers use their respective connectivity rules."""
-    img = np.zeros((4, 3, 1))
-    img[0, 0] = 1
-    img[1, (0, 2)] = 1
-    img[2, 2] = 1
-    img[3, 2] = 1
+    img = np.zeros((4, 4, 2))
+    img[0, 0, 0] = 1
+    img[1, (0, 3), 0] = 1
+    img[2, 3, 0] = 1
+    img[3, 3, 0] = 1
 
     assert not tau.Solver(img, device='cpu').percolates[0]
     assert tau.PeriodicSolver(img, device='cpu').percolates[0]
@@ -257,7 +271,7 @@ def test_periodic_mphsolver_on_uniform_block():
 def test_periodic_mphsolver_matches_periodic_solver_for_binary_case():
     """Binary limit of periodic multiphase should match PeriodicSolver."""
     N = 20
-    img = np.zeros((N, N + 1, N + 1))
+    img = np.zeros((N, N + 2, N + 2))
     for i in range(N):
         img[i, i:i + 2, i:i + 2] = 1
 
