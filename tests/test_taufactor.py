@@ -113,9 +113,9 @@ def test_periodic_solvers_reject_odd_y_dimension(solver_cls):
         solver_cls(np.ones((4, 3, 2)), omega=1.4, device='cpu')
 
 
-def test_periodic_transport_solver_rejects_odd_z_dimension_with_online_omega():
+def test_periodic_transport_solver_rejects_odd_z_dimension_with_adaptive_omega():
     with pytest.raises(ValueError, match='even Y/Z dimensions'):
-        tau.PeriodicSolver(np.ones((4, 2, 1)), omega='online', device='cpu')
+        tau.PeriodicSolver(np.ones((4, 2, 1)), omega='adaptive', device='cpu')
 
 def test_connectivity_settings_match_solver_boundaries():
     """Periodic and electrode solvers use their respective connectivity rules."""

@@ -22,17 +22,17 @@ class ThroughTransportSolver(SORSolver):
 
 
     ``omega=None`` preserves the size-based fixed relaxation factor. A number
-    fixes it explicitly; ``omega='online'`` starts from a slice spectral
+    fixes it explicitly; ``omega='adaptive'`` starts from a slice spectral
     estimate and adapts independently for each batch channel using full-sweep
     update norms.
     """
     def __init__(self, img, omega=None, precision=None, device='cuda'):
         self.top_bc, self.bot_bc = (-0.5, 0.5) # boundary conditions
-        self._online_omega = isinstance(omega, str) and omega == 'online'
-        if isinstance(omega, str) and not self._online_omega:
-            raise ValueError("omega must be None, a number, or 'online'")
-        super().__init__(img, 1.0 if self._online_omega else omega, precision, device)
-        if self._online_omega:
+        self._adaptive_omega = isinstance(omega, str) and omega == 'adaptive'
+        if isinstance(omega, str) and not self._adaptive_omega:
+            raise ValueError("omega must be None, a number, or 'adaptive'")
+        super().__init__(img, 1.0 if self._adaptive_omega else omega, precision, device)
+        if self._adaptive_omega:
             self._omega_values = self._coarse_omega_guess()
             self.omega = torch.as_tensor(
                 self._omega_values, dtype=self.precision, device=self.device,
@@ -76,7 +76,7 @@ class ThroughTransportSolver(SORSolver):
             omega[b] = min(2 / (1 + np.sqrt(1 - rho**2)), 2 - 1e-6)
         return omega
 
-    def _sample_omega_update(self, increment):
+    def _sample_adaptive_omega_update(self, increment):
         """Sample one complete red-black sweep every 20 full sweeps."""
         norm = torch.linalg.vector_norm(increment, dim=(1, 2, 3)).square()
         if self.iter % 40 == 39:
@@ -84,9 +84,9 @@ class ThroughTransportSolver(SORSolver):
         elif hasattr(self, '_omega_red_norm'):
             norm = torch.sqrt(self._omega_red_norm + norm).cpu().numpy()
             del self._omega_red_norm
-            self._update_online_omega(norm)
+            self._update_adaptive_omega(norm)
 
-    def _update_online_omega(self, norm):
+    def _update_adaptive_omega(self, norm):
         """Damp stable contraction estimates independently for each channel."""
         norm = np.asarray(norm, dtype=np.float64)
         previous = self._omega_norm
@@ -228,7 +228,7 @@ class Solver(ThroughTransportSolver):
         ValueError: If labels are not strictly in ``{0, 1}``.
     """
 
-    def __init__(self, img, omega='online', D_0=1, device='cuda'):
+    def __init__(self, img, omega='adaptive', D_0=1, device='cuda'):
         self._check_binary_labels(img)
         self.conductive_labels = [1]
         super().__init__(img, omega=omega, device=device)
@@ -293,7 +293,7 @@ class AnisotropicSolver(Solver):
         UserWarning: If spacing anisotropy is very large.
     """
 
-    def __init__(self, img, spacing, omega='online', D_0=1, device='cuda:0'):
+    def __init__(self, img, spacing, omega='adaptive', D_0=1, device='cuda:0'):
         if not isinstance(spacing, (list, tuple)) or len(spacing) != 3:
             raise ValueError("spacing must be a list or tuple with three elements (dx, dy, dz)")
         if not all(isinstance(x, (int, float)) for x in spacing):
@@ -384,7 +384,7 @@ class MultiPhaseSolver(ThroughTransportSolver):
         ValueError: If any diffusivity is negative or non-finite.
     """
 
-    def __init__(self, img, diffusivities=None, D_scaling=1, omega='online', device='cuda'):
+    def __init__(self, img, diffusivities=None, D_scaling=1, omega='adaptive', device='cuda'):
         # Validate diffusivities
         if diffusivities is None:
             diffusivities = {0: 0, 1: 1}

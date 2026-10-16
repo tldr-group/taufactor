@@ -217,7 +217,7 @@ class SORSolver(ABC):
             torch.cuda.reset_peak_memory_stats(device=self.device)
 
         self.tau_t = []
-        online_omega = getattr(self, '_online_omega', False)
+        adaptive_omega = getattr(self, '_adaptive_omega', False)
 
         with torch.no_grad():
             increment = torch.empty(
@@ -235,8 +235,8 @@ class SORSolver(ABC):
                 self.field[:, 1:-1, 1:-1, 1:-1] += increment
                 self.iter += 1
 
-                if online_omega and self.iter % 40 in (39, 0):
-                    self._sample_omega_update(increment)
+                if adaptive_omega and self.iter % 40 in (39, 0):
+                    self._sample_adaptive_omega_update(increment)
 
                 if self.iter % 100 == 0:
                     self.converged = self.check_convergence(verbose, conv_crit, plot_interval)
