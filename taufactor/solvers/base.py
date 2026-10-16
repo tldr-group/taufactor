@@ -39,6 +39,12 @@ class SORSolver(ABC):
             )
         self.cpu_img = self._expand_to_4d(img)
         self.batch_size, self.Nx, self.Ny, self.Nz = self.cpu_img.shape
+        if any(periodic and size % 2 for periodic, size in
+               zip(self.connectivity_periodic[1:], (self.Ny, self.Nz))):
+            raise ValueError(
+                "Periodic solvers require even Y/Z dimensions; use the "
+                "corresponding non-periodic solver instead!"
+            )
         self.device = self._init_device(device)
         self.precision = precision or torch.float
 

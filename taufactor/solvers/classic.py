@@ -24,8 +24,7 @@ class ThroughTransportSolver(SORSolver):
     ``omega=None`` preserves the size-based fixed relaxation factor. A number
     fixes it explicitly; ``omega='online'`` starts from a slice spectral
     estimate and adapts independently for each batch channel using full-sweep
-    update norms. Online adaptation requires even transverse dimensions for
-    periodic boundaries.
+    update norms.
     """
     def __init__(self, img, omega=None, precision=None, device='cuda'):
         self.top_bc, self.bot_bc = (-0.5, 0.5) # boundary conditions
